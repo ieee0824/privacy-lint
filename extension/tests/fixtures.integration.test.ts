@@ -111,6 +111,8 @@ describe("fixtures (DESIGN.md §34)", () => {
     expect(a.level).toBeGreaterThanOrEqual(WarningLevel.CAUTION);
     expect(ids(a)).toEqual(expect.arrayContaining(["privacy_policy_not_found", "cross_site_form_action"]));
     expect(a.statuses.operator).toBe("confirmed");
+    // Table layout + romanized names (namae / jusho / denwa / mail).
+    expect(a.sensitiveKinds).toEqual(["address", "birthdate", "email", "name", "phone"]);
   });
 
   it("C: newsletter asking for address and birth date → data minimization concern", async () => {

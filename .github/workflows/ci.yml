@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  extension:
+    name: extension (typecheck, build, lint, unit + fixture tests)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      # tests/fixtures.integration.test.ts builds and starts the Go relay and Jev mock.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: relay/go.mod
+          cache-dependency-path: relay/go.mod
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run lint:firefox
+      - run: npm test
+
+  relay:
+    name: relay (gofmt, vet, test)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: relay/go.mod
+          cache-dependency-path: relay/go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed:"; echo "$unformatted"; exit 1
+          fi
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  e2e:
+    name: e2e (Firefox + Chromium privacy invariants)
+    runs-on: ubuntu-24.04
+    needs: [extension, relay]
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: relay/go.mod
+          cache-dependency-path: relay/go.mod
+      - run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Install Firefox
+        run: |
+          path=$(npx @puppeteer/browsers install firefox@stable --path "$RUNNER_TEMP/browsers" | tail -1 | cut -d' ' -f2-)
+          echo "FIREFOX_BIN=$path" >> "$GITHUB_ENV"
+          "$path" --version
+      - run: npm run test:e2e

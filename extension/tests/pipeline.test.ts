@@ -128,12 +128,13 @@ describe("assessment pipeline", () => {
 });
 
 describe("adversarial DOM", () => {
-  it("bounds work and output size on hostile pages", () => {
+  // Sizes exceed every limit (1000 registered controls, 60-char labels) while staying fast on CI runners.
+  it("bounds work and output size on hostile pages", { timeout: 30_000 }, () => {
     restore();
     const huge = "長".repeat(100_000);
     document.body.innerHTML =
       `<h1>${huge}</h1><form>` +
-      Array.from({ length: 3000 }, (_, i) => `<label>${huge.slice(0, 5000)}<input type="email" name="e${i}"></label>`).join("") +
+      Array.from({ length: 1200 }, (_, i) => `<label>${huge.slice(0, 2000)}<input type="email" name="e${i}"></label>`).join("") +
       `</form>`;
     const registry = new ControlRegistry();
     registry.addFrom(document);

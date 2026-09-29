@@ -88,10 +88,11 @@ const TYPE_KINDS = new Map<string, SensitiveFieldKind>([
   ["password", "password"],
 ]);
 
+// Romanized Japanese names (namae, jusho, denwa …) are common on older sites.
 // Order matters: email before address ("email address"), payment/government_id before name
 // ("card holder name", "passport number"), other_personal before name ("company name", "username").
 const TEXT_RULES: ReadonlyArray<[SensitiveFieldKind, RegExp]> = [
-  ["email", /e-?mail|メール|mail_?addr/i],
+  ["email", /e-?mail|メール|mail_?addr|^mail$|^mail[_-]|[_-]mail$/i],
   ["password", /passw(or)?d|passcode|パスワード|暗証番号/i],
   [
     "payment",
@@ -101,11 +102,11 @@ const TEXT_RULES: ReadonlyArray<[SensitiveFieldKind, RegExp]> = [
     "government_id",
     /my.?number|マイナンバー|個人番号|passport|パスポート|免許|driver.?licen|ssn|social.?security|保険証|在留カード|national.?id|tax.?id/i,
   ],
-  ["birthdate", /birth|bday|dob\b|生年月日|誕生日/i],
-  ["phone", /\btel\b|tel_|_tel|phone|mobile|cell|電話|携帯|\bfax\b/i],
+  ["birthdate", /birth|bday|dob\b|生年月日|誕生日|seinengappi|tanjou?bi/i],
+  ["phone", /\btel\b|tel_|_tel|phone|mobile|cell|電話|携帯|\bfax\b|denwa|keitai/i],
   [
     "address",
-    /address|addr\b|addr_|street|city|\bzip|postal|post.?code|prefecture|住所|郵便番号|都道府県|市区町村|番地|建物|丁目/i,
+    /address|addr\b|addr_|street|city|\bzip|postal|post.?code|prefecture|住所|郵便番号|都道府県|市区町村|番地|建物|丁目|ju+sho|yu+bin|todoufuken/i,
   ],
   [
     "other_personal",
@@ -113,7 +114,7 @@ const TEXT_RULES: ReadonlyArray<[SensitiveFieldKind, RegExp]> = [
   ],
   [
     "name",
-    /(^|[\s_\-[\].])(full|first|last|family|given|real|middle|sur)?_?name($|[\s_\-[\].])|firstname|lastname|fullname|surname|氏名|名前|お名前|フリガナ|ふりがな|カナ|\bkana\b|\bsei\b|\bmei\b/i,
+    /(^|[\s_\-[\].])(full|first|last|family|given|real|middle|sur)?_?name($|[\s_\-[\].])|firstname|lastname|fullname|surname|氏名|名前|お名前|フリガナ|ふりがな|カナ|\bkana\b|\bsei\b|\bmei\b|o?namae|shimei|furigana/i,
   ],
 ];
 

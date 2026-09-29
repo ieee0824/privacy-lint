@@ -68,7 +68,19 @@ function labelOf(el: Control): string | undefined {
       if (text) return text;
     }
   }
-  return attrText(el, "aria-label", LIMITS.labelText) ?? attrText(el, "title", LIMITS.labelText);
+  return attrText(el, "aria-label", LIMITS.labelText) ?? attrText(el, "title", LIMITS.labelText) ?? layoutLabelOf(el);
+}
+
+/**
+ * Table / definition-list layouts without <label>:
+ * <tr><th>お名前</th><td><input></td></tr> or <dt>住所</dt><dd><input></dd>.
+ */
+function layoutLabelOf(el: Control): string | undefined {
+  const cell = el.closest("td, dd");
+  if (!cell) return undefined;
+  const previous = cell.previousElementSibling;
+  if (!previous || !/^(TH|TD|DT)$/.test(previous.tagName)) return undefined;
+  return authorText(previous, LIMITS.labelText) || undefined;
 }
 
 /** The group asking for the widest range of personal data, if any asks for some. */
