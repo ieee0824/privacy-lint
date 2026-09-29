@@ -19,7 +19,18 @@ export const DEFAULT_SETTINGS: Settings = {
   inPageNotice: true,
 };
 
-const KEY = "settings";
+export const SETTINGS_KEY = "settings";
+const KEY = SETTINGS_KEY;
+
+/**
+ * The settings that change an assessment's outcome (#15). `inPageNotice` only affects display.
+ * The relay endpoint and credential matter only while remote evaluation is on.
+ * Used inside a SHA-256 cache key, so the credential is never stored in plain text.
+ */
+export function evaluationFingerprint(settings: Partial<Settings> | undefined): string {
+  const s = { ...DEFAULT_SETTINGS, ...settings };
+  return JSON.stringify(s.remoteEvaluation ? [true, s.relayUrl, s.relayCredential] : [false]);
+}
 
 export async function loadSettings(): Promise<Settings> {
   const stored = (await ext.storage.local.get(KEY))[KEY] as Partial<Settings> | undefined;
