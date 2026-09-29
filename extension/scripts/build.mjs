@@ -36,14 +36,24 @@ for (const browser of browsers) {
     format: "iife",
     target: browser === "chrome" ? "chrome120" : "firefox140",
     minify: false,
+    // Removes `if (__E2E__)` branches from normal builds while keeping output readable.
+    minifySyntax: true,
     sourcemap: false,
     legalComments: "none",
-    define: { __RELAY_URL__: JSON.stringify(relayUrl) },
+    define: { __RELAY_URL__: JSON.stringify(relayUrl), __E2E__: JSON.stringify(e2e) },
     logLevel: "warning",
   });
 
   for (const file of ["popup.html", "options.html", "ui.css"]) cpSync(join(root, "src/ui", file), join(out, file));
   cpSync(join(root, "icons"), join(out, "icons"), { recursive: true });
+
+  if (!e2e) {
+    for (const file of ["content.js", "background.js"]) {
+      if (readFileSync(join(out, file), "utf8").includes("e2e-dump")) {
+        throw new Error(`${file}: E2E hook leaked into a normal build`);
+      }
+    }
+  }
 
   const manifest = { ...readJson("manifest/base.json"), ...readJson(`manifest/${browser}.json`), version: pkg.version };
   if (e2e) manifest.host_permissions = ["http://*/*", "https://*/*"];

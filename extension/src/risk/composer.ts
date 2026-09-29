@@ -159,6 +159,8 @@ export function compose(input: ComposeInput): Assessment {
     level = maxLevel(level, Level.CAUTION);
   }
   if (minimization !== null && minimization >= 2 / 3 - 0.08) level = maxLevel(level, Level.CAUTION);
+  // A ⚠ item next to "no signs worth noting" would contradict itself.
+  if (findings.some((f) => f.severity === "warn")) level = maxLevel(level, Level.NOTICE);
 
   // --- state: unknown never silently becomes low risk (§19, §29) ---
   let state: AssessmentState;

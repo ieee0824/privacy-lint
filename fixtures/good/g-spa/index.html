@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><title>見本アプリ</title></head>
+<body>
+<h1>見本アプリ</h1>
+<div id="app"><p>読み込み中…</p></div>
+<footer><a href="../../good/a-ec/privacy.html">プライバシーポリシー</a> <a href="../../good/a-ec/company.html">特定商取引法に基づく表記</a></footer>
+<script>
+  // The form appears only after the initial content-script scan (DESIGN.md §27).
+  setTimeout(function () {
+    var app = document.getElementById("app");
+    var form = document.createElement("form");
+    form.method = "post";
+    form.action = "/account/profile";
+    var fields = [["氏名", "name", "name"], ["メールアドレス", "email", "email"], ["電話番号", "tel", "tel"]];
+    fields.forEach(function (f) {
+      var label = document.createElement("label");
+      label.textContent = f[0] + " ";
+      var input = document.createElement("input");
+      input.name = f[1];
+      input.setAttribute("autocomplete", f[2]);
+      label.appendChild(input);
+      form.appendChild(label);
+    });
+    var button = document.createElement("button");
+    button.type = "submit";
+    button.textContent = "保存";
+    form.appendChild(button);
+    app.replaceChildren(form);
+  }, 1500);
+</script>
+</body>
+</html>

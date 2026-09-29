@@ -61,6 +61,7 @@ func main() {
 	flag.Parse()
 
 	var mu sync.Mutex
+	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok")) })
 	http.HandleFunc("/v1/systemone", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		if err != nil {

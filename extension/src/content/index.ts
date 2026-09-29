@@ -49,8 +49,18 @@ function main(): void {
   });
 }
 
+/** E2E-only: lets the test page read extension storage where WebDriver BiDi cannot (Firefox). */
+function installE2eHook(): void {
+  document.addEventListener("privacy-lint-e2e-dump", () => {
+    ext.runtime.sendMessage({ type: "e2e-dump" }).then((dump) => {
+      document.documentElement.setAttribute("data-privacy-lint-e2e-dump", JSON.stringify(dump));
+    });
+  });
+}
+
 const scope = globalThis as unknown as Record<symbol, boolean>;
 if (window.top === window && !scope[LOADED]) {
   scope[LOADED] = true;
   main();
+  if (__E2E__) installE2eHook();
 }

@@ -18,7 +18,15 @@ export async function grantedMatchPatterns(): Promise<string[]> {
   return Array.from(patterns).sort();
 }
 
-export async function syncContentScripts(): Promise<void> {
+let syncing: Promise<void> = Promise.resolve();
+
+/** Serialized: start-up, onInstalled and permission events can overlap. */
+export function syncContentScripts(): Promise<void> {
+  syncing = syncing.catch(() => undefined).then(syncOnce);
+  return syncing;
+}
+
+async function syncOnce(): Promise<void> {
   const matches = await grantedMatchPatterns();
   const registered = await ext.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] });
   const current = registered[0]?.matches?.slice().sort() ?? [];
@@ -33,8 +41,8 @@ export async function syncContentScripts(): Promise<void> {
       matches,
       runAt: "document_idle",
       allFrames: false,
-      // Re-registered on every background start-up instead; Firefox and Chrome differ here.
-      persistAcrossSessions: false,
+      // Kept across browser restarts (the default) so restored tabs are covered before the
+      // background has started; syncContentScripts() still reconciles on every start-up.
     },
   ]);
 }

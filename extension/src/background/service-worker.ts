@@ -7,7 +7,7 @@ import type { ContentMessage, PopupMessage, TabStatusResponse } from "../shared/
 import { validatePageObservation } from "../shared/validate";
 import { assessTab, forgetObservation, markFocused, recallObservation, rememberObservation } from "./assessment";
 import { clearCache, pruneExpired } from "./cache";
-import { injectIntoPermittedTabs, permissionFor, syncContentScripts } from "./permissions";
+import { grantedMatchPatterns, injectIntoPermittedTabs, permissionFor, syncContentScripts } from "./permissions";
 import { clearTabStatus, getTabStatus } from "./tab-state";
 
 type Sender = chrome.runtime.MessageSender;
@@ -62,6 +62,13 @@ ext.runtime.onMessage.addListener((message: unknown, sender: Sender, sendRespons
     handleContent(message as ContentMessage, sender).catch(() => undefined);
     return false;
   }
+  if (__E2E__ && sender.tab && type === "e2e-dump") {
+    Promise.all([ext.storage.local.get(null), ext.storage.session.get(null)]).then(
+      ([local, session]) => sendResponse({ local, session }),
+      () => sendResponse(null),
+    );
+    return true;
+  }
   if (isFromExtensionPage(sender) && (type === "get-tab-status" || type === "reassess" || type === "clear-cache")) {
     handlePopup(message as PopupMessage).then(sendResponse, () => sendResponse(null));
     return true;
@@ -90,8 +97,16 @@ ext.permissions.onRemoved.addListener(() => {
   syncContentScripts().catch(() => undefined);
 });
 
-ext.runtime.onInstalled.addListener((details) => {
-  if (details.reason === "install") ext.runtime.openOptionsPage().catch(() => undefined);
+ext.runtime.onInstalled.addListener(async (details) => {
+  // Tabs that were already open do not get newly registered content scripts on their own.
+  await syncContentScripts().catch(() => undefined);
+  await injectIntoPermittedTabs(await grantedMatchPatterns()).catch(() => undefined);
+  if (details.reason !== "install") return;
+  // Onboarding: explain what is read and sent, and let the user grant site access.
+  ext.runtime
+    .openOptionsPage()
+    .catch(() => ext.tabs.create({ url: ext.runtime.getURL("options.html") }))
+    .catch(() => undefined);
 });
 
 ext.runtime.onStartup.addListener(() => {
