@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><title>ご注文手続き | サンプル雑貨店</title>
+<script src="https://www.googletagmanager.example/gtag.js"></script></head>
+<body>
+<header><h1>サンプル雑貨店</h1></header>
+<main>
+  <section>
+    <h2>お届け先とお支払い</h2>
+    <form method="post" action="/checkout/confirm">
+      <fieldset><legend>お届け先</legend>
+        <label for="name">お名前</label><input id="name" name="name" autocomplete="name" required>
+        <label for="email">メールアドレス</label><input id="email" type="email" name="email" autocomplete="email" required>
+        <label for="tel">電話番号</label><input id="tel" type="tel" name="tel" autocomplete="tel" required>
+        <label for="zip">郵便番号</label><input id="zip" name="zip" autocomplete="postal-code" required>
+        <label for="addr">住所</label><input id="addr" name="address" autocomplete="street-address" required>
+      </fieldset>
+      <fieldset><legend>お支払い</legend>
+        <label for="cc">カード番号</label><input id="cc" name="cc" autocomplete="cc-number" inputmode="numeric" required>
+        <label for="exp">有効期限</label><input id="exp" name="exp" autocomplete="cc-exp" required>
+      </fieldset>
+      <button type="submit">注文を確定する</button>
+    </form>
+  </section>
+</main>
+<footer>
+  <a href="company.html">特定商取引法に基づく表記</a>
+  <a href="privacy.html">プライバシーポリシー</a>
+  <p>&copy; 2025 株式会社サンプル雑貨</p>
+</footer>
+</body>
+</html>
