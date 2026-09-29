@@ -1,0 +1,12 @@
+node_modules/
+dist/
+/extension/.e2e-artifacts/
+/extension/web-ext-artifacts/
+/tmp/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+coverage/
+/relay/bin/
