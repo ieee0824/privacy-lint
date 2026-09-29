@@ -30,6 +30,8 @@ const FORM_HTML = `
   </main>
   <footer>運営: 株式会社サンプル旅館 TEL 03-1111-2222 info@sample-ryokan.example <a href="/company?ref=footer">会社概要</a> <a href="/privacy#top">プライバシーポリシー</a></footer>
   <script src="https://analytics.example-tracker.com/t.js"></script>
+  <script src="/js/jquery-1.12.4.min.js?session=SESSIONSECRET123"></script>
+  <meta name="generator" content="WordPress 4.9.8">
 `;
 
 let restore: () => void = () => {};
@@ -99,6 +101,14 @@ describe("form scanning (privacy invariants)", () => {
   it("collects third-party script origins", () => {
     const o = observe()!;
     expect(o.resources).toContainEqual({ origin: "https://analytics.example-tracker.com", kind: "script" });
+  });
+
+  it("detects versioned components without keeping their URLs", () => {
+    const o = observe()!;
+    expect(o.components).toEqual([
+      { id: "jquery", version: "1.12.4" },
+      { id: "wordpress", version: "4.9.8" },
+    ]);
   });
 
   it("returns null when no sensitive field exists", () => {

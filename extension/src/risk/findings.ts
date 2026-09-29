@@ -27,6 +27,8 @@ const FINDING_TEXT: Record<FindingId, (f: Finding) => string> = {
   third_party_scripts_many: (f) => `${f.count ?? 0}種類の外部サービスのスクリプトがこのページで動作しています`,
   third_party_scripts_some: (f) => `${f.count ?? 0}種類の外部サービスのスクリプトがこのページで動作しています`,
   maintenance_signals: () => "利用者向けの文書が長期間更新されていない兆候があります",
+  outdated_components: (f) =>
+    `提供元のサポートが終了した版のソフトウェアが使われています: ${(f.names ?? []).join("、")}`,
   unknown_operator: () => "運営者情報については判断に十分な情報が得られませんでした",
   unknown_privacy_disclosure: () => "プライバシーポリシーの内容については判断に十分な情報が得られませんでした",
   unknown_policy_alignment: () => "ポリシーとフォームの対応については判断に十分な情報が得られませんでした",

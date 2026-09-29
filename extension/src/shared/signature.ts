@@ -9,5 +9,6 @@ export function observationSignature(o: PageObservation): string {
     o.form.method,
     o.links.privacy.map((l) => l.url),
     o.links.operator.map((l) => l.url),
+    o.components.map((c) => `${c.id}@${c.version}`).sort(),
   ]);
 }

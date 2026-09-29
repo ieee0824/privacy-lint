@@ -14,6 +14,8 @@ privacy-lint が「何を読み、何を送り、何を保存するか」の一�
 | `input` / `change` / `keydown` / `paste` 等のイベント | **購読しない**（`focusin` の発生のみ） | `content/ui-trigger.ts` |
 | Cookie / localStorage / sessionStorage / IndexedDB / クリップボード | **読まない** | 静的検査 |
 | 通信 | origin と initiator 種別のみ（Resource Timing API）。本文・ヘッダは構造的に参照不可 | `content/resource-scanner.ts` |
+| `script` / `link` / Resource Timing の URL、`<meta name="generator">` | 部品のバージョン推測に使う。部品 ID と数値の版だけを残し、URL は保持しない | `content/component-scanner.ts` |
+| ポリシー等を取得した際の `Server` / `X-Powered-By` ヘッダー | ページと同じサイトの場合のみ、部品のバージョン推測に使う | `background/assessment.ts` |
 | スクリーンショット | **取得しない** | 静的検査 |
 | iframe 内のフォーム | MVP では読まない（top frame のみ） | `allFrames: false` |
 
@@ -31,7 +33,7 @@ privacy-lint が「何を読み、何を送り、何を保存するか」の一�
 | 第三者 origin の **数** | `scriptOrigins: 3` |
 
 送信しないもの: URL のパス・クエリ・フラグメント、送信先 origin そのもの、第三者 origin の名前、
-入力値、ページ本文全体、リンク先 URL。
+入力値、ページ本文全体、リンク先 URL、検出した部品とそのバージョン（拡張内でのみ判定）。
 
 伏せ字（`privacy/sanitizer.ts`）: メールアドレス → `[email]`、電話番号 → `[phone]`、
 カード番号（Luhn）→ `[card]`、8 桁以上の数字列 → `[number]`、JWT / 長いトークン → `[token]`、URL → `[url]`。
@@ -41,7 +43,7 @@ privacy-lint が「何を読み、何を送り、何を保存するか」の一�
 | 保存先 | 内容 | 期間 |
 |---|---|---|
 | `storage.local` `settings` | Relay URL、Relay 認証値、外部送信の可否、ページ内通知の可否 | 利用者が変更するまで |
-| `storage.local` `assessment:<sha256>` | 評価結果（レベル・所見 ID・状態）。キーは origin + フォーム署名のハッシュ | TTL（1〜24 時間）経過で削除 |
+| `storage.local` `assessment:<sha256>` | 評価結果（レベル・所見 ID・状態、サポート終了の部品名）。キーは origin + フォーム署名のハッシュ | TTL（1〜24 時間）経過で削除 |
 | `storage.session` `tab:<id>` / `obs:<id>` | タブごとの評価状態と最新の観測データ | タブを閉じる・遷移する・ブラウザ終了で消える |
 
 保存しないもの: 閲覧履歴、入力値、ページ本文、ポリシー全文、利用者の識別子。

@@ -78,7 +78,9 @@ function serveFixtures(listenPort) {
     let html = readFileSync(file, "utf8");
     // Fixture H: make the embedded form genuinely cross-origin.
     html = html.replace('src="frame.html"', `src="http://localhost:${otherSitePort}/ambiguous/h-iframe/frame.html"`);
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(html);
+    const extra = join(file, "..", "headers.json");
+    const headers = existsSync(extra) ? JSON.parse(readFileSync(extra, "utf8")) : {};
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", ...headers }).end(html);
   });
   server.listen(listenPort, "127.0.0.1");
   return server;
