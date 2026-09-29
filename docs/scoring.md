@@ -30,8 +30,10 @@ unknown は 0（低リスク）に置き換えない。
 | dataMinimization | 0.20 | Score（4 段階）を 0〜1 に正規化 |
 | thirdPartyExposure | 0.10 | 第三者 script の registrable domain 数: 0→0、1〜2→0.2、3〜5→0.4、6〜10→0.7、11+→1.0（iframe 1 件ごとに +0.05） |
 | technicalSignals | 0.05 | http ページ / http 送信先 → 1、別サイト送信 → 0.6、同一サイト別ホスト → 0.2 |
+| componentMaintenance | 0.10 | サポート終了表（DESIGN.md §44）で判定。検出できなければ unknown（所見なし）、サポート終了の版が無ければ 0、終了から 1 年未満 0.5 / 3 年未満 0.75 / それ以上 1.0 |
 
-`maintenance_signals` は説明用の所見のみで、重みを持たない（古い copyright だけで判断しないため）。
+`maintenance_signals`（Jev による文書の古さの判断）は説明用の所見のみで、重みを持たない（古い copyright だけで判断しないため）。
+部品の版に基づく `componentMaintenance` は決定論なので重みを持つ。
 
 ## レベル
 
@@ -77,7 +79,7 @@ unknown は 0（低リスク）に置き換えない。
 | fixture | 期待 |
 |---|---|
 | A EC サイト | NORMAL、⚠ なし |
-| B 古い予約サイト | CAUTION 以上、ポリシーなし・別サイト送信 |
+| B 古い予約サイト | CAUTION 以上、ポリシーなし・別サイト送信・サポート終了の部品（jQuery 1.x / Apache 2.2 / PHP 5） |
 | C ニュースレター | CAUTION 以上、入力要求が過剰 |
 | D 外部フォーム（説明あり） | NOTICE、⚠ は別サイト送信のみ |
 | E フォームに触れないポリシー | CAUTION 以上、ポリシーとフォームの不一致・利用目的不明 |
