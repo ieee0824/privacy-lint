@@ -33,9 +33,12 @@ export async function sha256Hex(text: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** The form signature is part of the key: minimization depends on the specific form. */
-export function cacheKeyInput(origin: string, formSignature: string): string {
-  return `${origin}\n${formSignature}`;
+/**
+ * Everything that determines the outcome is part of the key: the page's observation
+ * signature (#16) and the result-affecting settings (#15).
+ */
+export function cacheKeyInput(origin: string, observationSignature: string, settingsFingerprint: string): string {
+  return `${origin}\n${observationSignature}\n${settingsFingerprint}`;
 }
 
 export async function getCached(keyHash: string, now: number): Promise<Assessment | null> {

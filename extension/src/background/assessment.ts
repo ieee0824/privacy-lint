@@ -22,7 +22,7 @@ import { fetchDocument } from "./document-fetcher";
 import { OPERATOR_KEYWORDS, PRIVACY_KEYWORDS, extractExcerpts, htmlToBlocks } from "./document-text";
 import { relationOf, summarizeThirdParty } from "./network-observer";
 import { requestAssessment } from "./relay-client";
-import { loadSettings, type Settings } from "./settings";
+import { evaluationFingerprint, loadSettings, type Settings } from "./settings";
 import { clearTabStatus, getTabStatus, setTabStatus } from "./tab-state";
 
 export interface Deps {
@@ -76,7 +76,9 @@ export async function assessTab(
   const isCurrent = () => generations.get(tabId) === generation;
 
   const settings = await loadSettings();
-  const keyHash = await sha256Hex(cacheKeyInput(observation.page.origin, observationSignature(observation)));
+  const keyHash = await sha256Hex(
+    cacheKeyInput(observation.page.origin, observationSignature(observation), evaluationFingerprint(settings)),
+  );
   const focused = await wasFocused(tabId);
 
   if (!options.force) {

@@ -8,6 +8,7 @@ import { validatePageObservation } from "../shared/validate";
 import { assessTab, forgetTab, markFocused, recallObservation, rememberObservation, resetTab } from "./assessment";
 import { clearCache, pruneExpired } from "./cache";
 import { grantedMatchPatterns, injectIntoPermittedTabs, permissionFor, syncContentScripts } from "./permissions";
+import { SETTINGS_KEY, evaluationFingerprint, type Settings } from "./settings";
 import { getTabStatus } from "./tab-state";
 
 type Sender = chrome.runtime.MessageSender;
@@ -108,6 +109,16 @@ ext.runtime.onInstalled.addListener(async (details) => {
     .openOptionsPage()
     .catch(() => ext.tabs.create({ url: ext.runtime.getURL("options.html") }))
     .catch(() => undefined);
+});
+
+// Results computed under other settings must not be reused (#15). The fingerprint is also
+// part of the cache key; clearing additionally drops entries that can no longer be hit.
+ext.storage.onChanged.addListener((changes, areaName) => {
+  const change = changes[SETTINGS_KEY];
+  if (areaName !== "local" || !change) return;
+  const before = evaluationFingerprint(change.oldValue as Partial<Settings> | undefined);
+  const after = evaluationFingerprint(change.newValue as Partial<Settings> | undefined);
+  if (before !== after) clearCache().catch(() => undefined);
 });
 
 ext.runtime.onStartup.addListener(() => {
