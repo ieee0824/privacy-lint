@@ -11,7 +11,6 @@
     "test": "vitest run",
     "lint:firefox": "web-ext lint --source-dir dist/firefox",
     "dev:firefox": "web-ext run --source-dir dist/firefox --target firefox-desktop",
-    "dev:chrome": "web-ext run --source-dir dist/chrome --target chromium",
     "test:e2e": "node tests/e2e/run.mjs",
     "test:all": "npm run typecheck && npm test && npm run test:e2e"
   },
