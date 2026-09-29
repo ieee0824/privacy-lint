@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Privacy Lint",
+  "description": "個人情報を入力する前に、追加で確認した方がよい点を提示します。サイトの安全性を判定するものではありません。",
+  "permissions": ["storage", "scripting", "activeTab"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "action": {
+    "default_title": "Privacy Lint",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" }
+  },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Lint 設定</title>
+  <link rel="stylesheet" href="ui.css">
+  <style>
+    body { padding: 24px 16px 48px; }
+    main { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 20px; color: var(--fg); margin-bottom: 4px; }
+    h2 { font-size: 15px; margin-top: 28px; }
+    section { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-top: 12px; background: var(--surface); }
+    ul { padding-left: 20px; margin: 6px 0; }
+    label { display: block; margin: 10px 0 4px; font-weight: 600; }
+    label.check { display: flex; gap: 8px; align-items: flex-start; font-weight: normal; }
+    input[type=url], input[type=password] { width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
+    #status { min-height: 1.5em; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Privacy Lint</h1>
+  <p class="muted">個人情報を入力する前に、追加で確認した方がよい点を提示します。サイトが安全か危険かを判定するものではありません。</p>
+
+  <h2>サイトへのアクセス</h2>
+  <section>
+    <p>評価には、ページの構造（入力欄の種類・ラベル、リンク、読み込まれている外部サービスの種類）を読み取る許可が必要です。</p>
+    <p id="access-state" class="muted"></p>
+    <div class="actions">
+      <button id="grant-all" class="primary">すべてのサイトで有効化</button>
+      <button id="revoke-all">許可を取り消す</button>
+    </div>
+    <p class="small muted">サイトごとに許可したい場合は、そのページでツールバーのアイコンから「このサイトで有効化」を選んでください。</p>
+  </section>
+
+  <h2>読み取らないもの</h2>
+  <section>
+    <ul>
+      <li>入力欄に入力された値（氏名・メール・パスワード・カード番号など）</li>
+      <li>Cookie、localStorage などサイトの保存データ、クリップボード</li>
+      <li>通信の中身（送信されるフォームの内容など）</li>
+      <li>スクリーンショット、ページ全体の本文</li>
+    </ul>
+  </section>
+
+  <h2>外部に送信するもの</h2>
+  <section>
+    <p>文書内容の評価を有効にすると、次の情報を Privacy Relay 経由で評価サービス（TypeSafe Jev）に送信します。</p>
+    <ul>
+      <li>ページの origin（例: https://example.com）、URL の種類（予約・購入など）、ページタイトルと見出し</li>
+      <li>入力欄の種類とラベル（値は含みません）</li>
+      <li>プライバシーポリシー・運営者情報ページから抽出した短い抜粋</li>
+      <li>外部サービスの数</li>
+    </ul>
+    <p class="small muted">メールアドレス・電話番号・カード番号・トークンに見える文字列は送信前に伏せ字にします。URL のクエリ文字列やフラグメントは送信しません。</p>
+    <label class="check"><input type="checkbox" id="remoteEvaluation"> 文書内容の評価を有効にする（外部送信）</label>
+  </section>
+
+  <h2>表示</h2>
+  <section>
+    <label class="check"><input type="checkbox" id="inPageNotice"> 注意が必要な場合、入力欄を操作し始めたときにページ右下へ通知を表示する</label>
+  </section>
+
+  <h2>開発者向け</h2>
+  <section>
+    <label for="relayUrl">Privacy Relay URL</label>
+    <input type="url" id="relayUrl" spellcheck="false">
+    <label for="relayCredential">Relay トークン（任意）</label>
+    <input type="password" id="relayCredential" autocomplete="off">
+    <p class="small muted">Jev の API キーは拡張機能に保存しません。キーは Relay 側で管理します。</p>
+  </section>
+
+  <div class="actions">
+    <button id="save" class="primary">保存</button>
+    <button id="clear-cache">評価キャッシュを削除</button>
+  </div>
+  <p id="status" role="status" class="muted"></p>
+</main>
+<script src="options.js"></script>
+</body>
+</html>
