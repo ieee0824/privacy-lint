@@ -36,6 +36,7 @@ export type FindingId =
   | "third_party_scripts_many"
   | "third_party_scripts_some"
   | "maintenance_signals"
+  | "outdated_components"
   | "unknown_operator"
   | "unknown_privacy_disclosure"
   | "unknown_policy_alignment"
@@ -48,6 +49,8 @@ export interface Finding {
   severity: "warn" | "info";
   /** Numeric parameters only; page-derived strings are never stored in findings. */
   count?: number;
+  /** Labels built from the bundled lifecycle table (never from page content), e.g. "jQuery 1.x（2016年にサポート終了）". */
+  names?: string[];
 }
 
 export interface Statuses {

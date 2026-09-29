@@ -3,9 +3,11 @@
  */
 import type { Assessment, AssessmentState, Finding, Statuses, WarningLevel } from "../shared/assessment";
 import { WarningLevel as Level } from "../shared/assessment";
-import type { AssessRequest, AssessResponse, SensitiveFieldKind } from "../shared/schema";
+import type { AssessRequest, AssessResponse, ComponentObservation, SensitiveFieldKind } from "../shared/schema";
+import { unsupportedComponents, type LifecycleStatus } from "./component-lifecycle";
 import {
   WEIGHTS,
+  componentRisk,
   confidentScore,
   decidedNoul,
   thirdPartyRisk,
@@ -23,6 +25,8 @@ export interface ComposeInput {
   actionRelation: Statuses["formAction"];
   actionScheme: "https" | "http" | "other" | "none";
   sensitiveKinds: SensitiveFieldKind[];
+  /** Versioned components seen on the page or in same-site response headers (DESIGN.md §44). */
+  components: ComponentObservation[];
   remote: RemoteResult;
   now: number;
 }
@@ -128,6 +132,17 @@ export function compose(input: ComposeInput): Assessment {
   if (scripts >= 10) info("third_party_scripts_many", scripts);
   else if (scripts >= 3) info("third_party_scripts_some", scripts);
 
+  // --- component maintenance (deterministic, bundled lifecycle table) ---
+  const unsupported = unsupportedComponents(input.components, input.now);
+  const componentMaintenance = componentRisk(input.components.length, unsupported[0]?.daysSinceEnd ?? null);
+  if (unsupported.length > 0) {
+    findings.push({
+      id: "outdated_components",
+      severity: unsupported[0]!.daysSinceEnd >= 365 ? "warn" : "info",
+      names: unsupported.slice(0, 4).map(componentLabel),
+    });
+  }
+
   // --- maintenance signals: explanatory only, not weighted ---
   const stale = decidedNoul(answers.maintenance_signals);
   if (stale !== null && stale >= 0.5) info("maintenance_signals");
@@ -139,6 +154,7 @@ export function compose(input: ComposeInput): Assessment {
     dataMinimization: minimization,
     thirdPartyExposure: thirdPartyRisk(scripts, w.thirdParty.iframeOrigins),
     technicalSignals: technical,
+    componentMaintenance,
   };
 
   // --- aggregate over known features only ---
@@ -187,6 +203,11 @@ export function compose(input: ComposeInput): Assessment {
     sensitiveKinds: input.sensitiveKinds,
     assessedAt: input.now,
   };
+}
+
+function componentLabel(s: LifecycleStatus): string {
+  const line = s.line.includes(".") ? s.line : `${s.line}.x`;
+  return `${s.name} ${line}（${s.endOfSupport.slice(0, 4)}年にサポート終了）`;
 }
 
 export function levelFor(score: number): WarningLevel {

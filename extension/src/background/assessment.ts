@@ -6,12 +6,19 @@ import type { Assessment, Statuses, TabStatus } from "../shared/assessment";
 import { WarningLevel } from "../shared/assessment";
 import { ext } from "../shared/browser";
 import type { ContentNotice } from "../shared/messages";
-import type { AssessRequest, DocumentLink, LinkedDocumentState, PageObservation } from "../shared/schema";
-import { SCHEMA_VERSION } from "../shared/schema";
+import type {
+  AssessRequest,
+  ComponentObservation,
+  DocumentLink,
+  LinkedDocumentState,
+  PageObservation,
+} from "../shared/schema";
+import { LIMITS, SCHEMA_VERSION } from "../shared/schema";
+import { componentsFromHeaders, dedupeComponents } from "../shared/component-patterns";
 import { observationSignature } from "../shared/signature";
 import { compose, type RemoteResult } from "../risk/composer";
 import { cacheKeyInput, getCached, putCached, sha256Hex } from "./cache";
-import { fetchDocumentHtml } from "./document-fetcher";
+import { fetchDocument } from "./document-fetcher";
 import { OPERATOR_KEYWORDS, PRIVACY_KEYWORDS, extractExcerpts, htmlToBlocks } from "./document-text";
 import { relationOf, summarizeThirdParty } from "./network-observer";
 import { requestAssessment } from "./relay-client";
@@ -73,7 +80,7 @@ export async function assessTab(
 }
 
 export async function evaluate(observation: PageObservation, settings: Settings, deps: Deps): Promise<Assessment> {
-  const { request, actionRelation } = await buildRequest(observation, settings.remoteEvaluation, deps.fetchImpl);
+  const { request, actionRelation, components } = await buildRequest(observation, settings.remoteEvaluation, deps.fetchImpl);
 
   let remote: RemoteResult = { kind: "disabled" };
   if (settings.remoteEvaluation) {
@@ -87,6 +94,7 @@ export async function evaluate(observation: PageObservation, settings: Settings,
     actionRelation,
     actionScheme: observation.form.actionScheme,
     sensitiveKinds: kinds.sort(),
+    components,
     remote,
     now: deps.now(),
   });
@@ -96,15 +104,19 @@ export async function buildRequest(
   o: PageObservation,
   fetchDocuments: boolean,
   fetchImpl: typeof fetch,
-): Promise<{ request: AssessRequest; actionRelation: Statuses["formAction"] }> {
+): Promise<{ request: AssessRequest; actionRelation: Statuses["formAction"]; components: ComponentObservation[] }> {
   const actionRelation: Statuses["formAction"] = o.form.actionOrigin
     ? relationOf(o.page.origin, o.form.actionOrigin)
     : "none";
 
-  const [privacyPolicy, operatorInfo] = await Promise.all([
-    readLinkedDocument(o.links.privacy, PRIVACY_KEYWORDS, fetchDocuments, fetchImpl),
-    readLinkedDocument(o.links.operator, OPERATOR_KEYWORDS, fetchDocuments, fetchImpl),
+  const [policy, operator] = await Promise.all([
+    readLinkedDocument(o.page.origin, o.links.privacy, PRIVACY_KEYWORDS, fetchDocuments, fetchImpl),
+    readLinkedDocument(o.page.origin, o.links.operator, OPERATOR_KEYWORDS, fetchDocuments, fetchImpl),
   ]);
+  const privacyPolicy = policy.state;
+  const operatorInfo = operator.state;
+  // Components stay in the extension; they are not part of the relay request.
+  const components = dedupeComponents([...o.components, ...policy.components, ...operator.components], LIMITS.components);
 
   const page: AssessRequest["website"]["page"] = {
     origin: o.page.origin,
@@ -117,6 +129,7 @@ export async function buildRequest(
 
   return {
     actionRelation,
+    components,
     request: {
       schemaVersion: SCHEMA_VERSION,
       website: {
@@ -137,23 +150,29 @@ export async function buildRequest(
 }
 
 async function readLinkedDocument(
+  pageOrigin: string,
   links: DocumentLink[],
   keywords: RegExp,
   fetchDocuments: boolean,
   fetchImpl: typeof fetch,
-): Promise<LinkedDocumentState> {
+): Promise<{ state: LinkedDocumentState; components: ComponentObservation[] }> {
   const state: LinkedDocumentState = { found: links.length > 0, fetched: false, excerpts: [] };
-  if (!fetchDocuments) return state;
+  const components: ComponentObservation[] = [];
+  if (!fetchDocuments) return { state, components };
   for (const link of links.slice(0, 2)) {
-    const html = await fetchDocumentHtml(link.url, fetchImpl);
-    if (html === null) continue;
-    const doc = htmlToBlocks(html);
+    const fetched = await fetchDocument(link.url, fetchImpl);
+    if (fetched === null) continue;
+    // Server headers describe this site only when the document is served from the same site.
+    if (relationOf(pageOrigin, new URL(fetched.url).origin) !== "cross_site") {
+      components.push(...componentsFromHeaders(fetched.server, fetched.poweredBy));
+    }
+    const doc = htmlToBlocks(fetched.html);
     state.fetched = true;
     state.excerpts = extractExcerpts(doc, keywords);
     if (doc.title) state.title = doc.title;
     if (state.excerpts.length > 0) break;
   }
-  return state;
+  return { state, components };
 }
 
 async function wasFocused(tabId: number): Promise<boolean> {

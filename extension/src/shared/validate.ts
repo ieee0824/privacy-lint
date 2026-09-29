@@ -6,6 +6,7 @@
 import type {
   AssessRequest,
   AssessResponse,
+  ComponentObservation,
   DocumentLink,
   FieldDescriptor,
   FormObservation,
@@ -14,6 +15,7 @@ import type {
   ResourceOrigin,
 } from "./schema";
 import {
+  COMPONENT_IDS,
   FORM_METHODS,
   LIMITS,
   PATH_CLASSES,
@@ -23,6 +25,7 @@ import {
   SENSITIVE_FIELD_KINDS,
 } from "./schema";
 import { isOrigin } from "../privacy/url-sanitizer";
+import { isVersion } from "./component-patterns";
 
 export class ValidationError extends Error {}
 
@@ -119,7 +122,7 @@ function schemaVersion(v: unknown, p: string): number {
 }
 
 export function validatePageObservation(v: unknown): PageObservation {
-  const o = obj(v, "observation", ["schemaVersion", "page", "form", "links", "resources"]);
+  const o = obj(v, "observation", ["schemaVersion", "page", "form", "links", "resources", "components"]);
   const page = obj(o.page, "page", ["origin", "scheme", "pathClass", "title", "headings", "footer"]);
   const form = obj(o.form, "form", [
     "method",
@@ -134,6 +137,12 @@ export function validatePageObservation(v: unknown): PageObservation {
   const link = (x: unknown, p: string): DocumentLink => {
     const l = obj(x, p, ["url", "text"]);
     return { url: httpUrl(l.url, `${p}.url`), text: str(l.text, `${p}.text`, LIMITS.labelText) };
+  };
+  const component = (x: unknown, p: string): ComponentObservation => {
+    const c = obj(x, p, ["id", "version"]);
+    const version = str(c.version, `${p}.version`, 20);
+    if (!isVersion(version)) fail(`${p}.version`, "not a version");
+    return { id: oneOf(c.id, `${p}.id`, COMPONENT_IDS), version };
   };
   const resource = (x: unknown, p: string): ResourceOrigin => {
     const r = obj(x, p, ["origin", "kind"]);
@@ -170,6 +179,7 @@ export function validatePageObservation(v: unknown): PageObservation {
       operator: arr(links.operator, "links.operator", LIMITS.links, link),
     },
     resources: arr(o.resources, "resources", LIMITS.resources, resource),
+    components: arr(o.components, "components", LIMITS.components, component),
   };
 }
 

@@ -8,6 +8,7 @@ const observation = () => ({
   form: { method: "post", actionScheme: "https", crossOriginAction: false, fieldCount: 1, fields: [{ kind: "email", required: false }], context: [] },
   links: { privacy: [{ url: "https://a.example/privacy", text: "Privacy" }], operator: [] },
   resources: [{ origin: "https://cdn.example", kind: "script" }],
+  components: [{ id: "jquery", version: "1.8.3" }],
 });
 
 describe("validatePageObservation", () => {
@@ -19,6 +20,15 @@ describe("validatePageObservation", () => {
     const o = observation() as Record<string, any>;
     o.form.fields[0].value = "taro@example.com";
     expect(() => validatePageObservation(o)).toThrow(/unexpected key value/);
+  });
+
+  it("rejects unknown components and non-numeric versions", () => {
+    const a = observation() as Record<string, any>;
+    a.components[0].id = "react";
+    expect(() => validatePageObservation(a)).toThrow();
+    const b = observation() as Record<string, any>;
+    b.components[0].version = "https://cdn.example/jquery-1.8.3.js";
+    expect(() => validatePageObservation(b)).toThrow();
   });
 
   it("rejects URLs with query strings", () => {

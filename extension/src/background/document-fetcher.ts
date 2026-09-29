@@ -7,7 +7,16 @@ import { parseHttpUrl } from "../privacy/url-sanitizer";
 const TIMEOUT_MS = 8000;
 const MAX_BYTES = 1_500_000;
 
-export async function fetchDocumentHtml(url: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
+export interface FetchedDocument {
+  html: string;
+  /** Final URL after redirects; used only to decide whether the headers describe the same site. */
+  url: string;
+  /** Server / X-Powered-By, read only for component version detection (DESIGN.md §44). */
+  server: string | null;
+  poweredBy: string | null;
+}
+
+export async function fetchDocument(url: string, fetchImpl: typeof fetch = fetch): Promise<FetchedDocument | null> {
   const parsed = parseHttpUrl(url);
   if (!parsed || parsed.search || parsed.hash) return null;
   try {
@@ -23,7 +32,12 @@ export async function fetchDocumentHtml(url: string, fetchImpl: typeof fetch = f
     if (!res.ok) return null;
     const type = res.headers.get("content-type") ?? "";
     if (!/text\/html|text\/plain|application\/xhtml/i.test(type)) return null;
-    return await readLimited(res);
+    return {
+      html: await readLimited(res),
+      url: res.url || parsed.href,
+      server: res.headers.get("server"),
+      poweredBy: res.headers.get("x-powered-by"),
+    };
   } catch {
     return null;
   }

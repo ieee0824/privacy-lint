@@ -13,6 +13,8 @@ export interface RiskFeatures {
   dataMinimization: number | null;
   thirdPartyExposure: number;
   technicalSignals: number;
+  /** null when no versioned component could be detected (DESIGN.md §44). */
+  componentMaintenance: number | null;
 }
 
 /** Initial hypothesis from DESIGN.md §20; tuned against fixtures, not a fixed spec. */
@@ -23,6 +25,7 @@ export const WEIGHTS: Record<keyof RiskFeatures, number> = {
   dataMinimization: 0.2,
   thirdPartyExposure: 0.1,
   technicalSignals: 0.05,
+  componentMaintenance: 0.1,
 };
 
 /** Choice / Score answers below this confidence are treated as unknown. */
@@ -56,6 +59,17 @@ export function weightedMean(entries: Array<[value: number | null, weight: numbe
     weight += w;
   }
   return weight > 0 ? sum / weight : null;
+}
+
+const YEAR_DAYS = 365;
+
+/** Risk from the most overdue unsupported component; 0 when components were seen and none is overdue. */
+export function componentRisk(detected: number, maxDaysSinceEnd: number | null): number | null {
+  if (detected === 0) return null;
+  if (maxDaysSinceEnd === null) return 0;
+  if (maxDaysSinceEnd < YEAR_DAYS) return 0.5;
+  if (maxDaysSinceEnd < 3 * YEAR_DAYS) return 0.75;
+  return 1;
 }
 
 export function thirdPartyRisk(scriptOrigins: number, iframeOrigins: number): number {

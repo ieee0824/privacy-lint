@@ -65,7 +65,10 @@ function fixtureFetch(): typeof fetch {
     const [, group, name] = /^([a-z]+)--([a-z0-9-]+)\.example$/.exec(url.hostname) ?? [];
     const file = group && name ? join(fixtures, group, name, url.pathname) : "";
     if (!file || !existsSync(file)) return new Response("not found", { status: 404 });
-    return new Response(readFileSync(file), { headers: { "content-type": "text/html; charset=utf-8" } });
+    // Optional per-fixture response headers (e.g. Server / X-Powered-By).
+    const extra = join(fixtures, group!, name!, "headers.json");
+    const headers = existsSync(extra) ? JSON.parse(readFileSync(extra, "utf8")) : {};
+    return new Response(readFileSync(file), { headers: { "content-type": "text/html; charset=utf-8", ...headers } });
   }) as typeof fetch;
 }
 
@@ -113,6 +116,10 @@ describe("fixtures (DESIGN.md §34)", () => {
     expect(a.statuses.operator).toBe("confirmed");
     // Table layout + romanized names (namae / jusho / denwa / mail).
     expect(a.sensitiveKinds).toEqual(["address", "birthdate", "email", "name", "phone"]);
+    // jQuery 1.4.2 from the page, Apache 2.2 / PHP 5 from the same-site document headers.
+    const outdated = a.findings.find((f) => f.id === "outdated_components");
+    expect(outdated?.severity).toBe("warn");
+    expect(outdated?.names?.map((n) => n.split("（")[0])).toEqual(["jQuery 1.x", "Apache HTTP Server 2.2", "PHP 5.x"]);
   });
 
   it("C: newsletter asking for address and birth date → data minimization concern", async () => {

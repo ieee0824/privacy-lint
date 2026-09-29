@@ -10,6 +10,7 @@ function input(partial: Partial<ComposeInput> = {}): ComposeInput {
     actionRelation: "same_origin",
     actionScheme: "https",
     sensitiveKinds: ["address", "email", "name"],
+    components: [],
     remote: { kind: "answered", answers: goodAnswers() },
     now: 1000,
     ...partial,
@@ -118,6 +119,57 @@ describe("unknown is never silently low risk (§19, §29)", () => {
     const a = compose(input({ request: request({ policy: { found: true, fetched: false, excerpts: [] } }) }));
     expect(a.statuses.privacyPolicy).toBe("unreachable");
     expect(ids(a)).toContain("privacy_policy_unreachable");
+  });
+});
+
+describe("component maintenance (DESIGN.md §44)", () => {
+  const NOW = Date.parse("2026-09-30T00:00:00Z");
+
+  it("no detected component → not part of the composition, no finding", () => {
+    const a = compose(input({ now: NOW }));
+    expect(ids(a)).not.toContain("outdated_components");
+    expect(a.level).toBe(WarningLevel.NORMAL);
+  });
+
+  it("detected and still supported → no finding", () => {
+    const a = compose(input({ now: NOW, components: [{ id: "jquery", version: "3.7.1" }, { id: "php", version: "8.3.4" }] }));
+    expect(ids(a)).not.toContain("outdated_components");
+    expect(a.level).toBe(WarningLevel.NORMAL);
+  });
+
+  it("long-unsupported components → warning naming them from the bundled table", () => {
+    const a = compose(
+      input({
+        now: NOW,
+        components: [
+          { id: "jquery", version: "1.8.3" },
+          { id: "php", version: "7.4.33" },
+          { id: "jquery", version: "1.12.4" },
+        ],
+      }),
+    );
+    const finding = a.findings.find((f) => f.id === "outdated_components");
+    expect(finding).toEqual({
+      id: "outdated_components",
+      severity: "warn",
+      names: ["jQuery 1.x（2016年にサポート終了）", "PHP 7.4（2022年にサポート終了）"],
+    });
+    expect(a.level).toBeGreaterThanOrEqual(WarningLevel.NOTICE);
+  });
+
+  it("recently unsupported → informational", () => {
+    const a = compose(input({ now: NOW, components: [{ id: "php", version: "8.1.2" }] }));
+    expect(a.findings.find((f) => f.id === "outdated_components")?.severity).toBe("info");
+  });
+
+  it("weighs into the composition: same site with an ancient stack scores higher", () => {
+    const base = request({ policy: { found: true, fetched: true, excerpts: ["x"] } });
+    const answers = { ...goodAnswers(), policy_covers_form_fields: noul(0.1) };
+    const without = compose(input({ now: NOW, request: base, remote: { kind: "answered", answers } }));
+    const withOld = compose(
+      input({ now: NOW, request: base, remote: { kind: "answered", answers }, components: [{ id: "apache", version: "2.2.15" }] }),
+    );
+    expect(withOld.level).toBeGreaterThanOrEqual(without.level);
   });
 });
 

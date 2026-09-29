@@ -114,6 +114,30 @@ export interface ResourceOrigin {
   kind: ResourceKind;
 }
 
+/**
+ * Software components whose support status is known (see risk/component-lifecycle.ts).
+ * Only these fixed IDs and a numeric version ever leave the detector; never the URL it came from.
+ */
+export const COMPONENT_IDS = [
+  "jquery",
+  "bootstrap",
+  "angularjs",
+  "vue",
+  "wordpress",
+  "drupal",
+  "php",
+  "apache",
+  "iis",
+] as const;
+
+export type ComponentId = (typeof COMPONENT_IDS)[number];
+
+export interface ComponentObservation {
+  id: ComponentId;
+  /** Numeric dotted version, e.g. "1.8.3". */
+  version: string;
+}
+
 /** Content script → background. Produced only when a sensitive field was detected. */
 export interface PageObservation {
   schemaVersion: number;
@@ -131,6 +155,7 @@ export interface PageObservation {
     operator: DocumentLink[];
   };
   resources: ResourceOrigin[];
+  components: ComponentObservation[];
 }
 
 export interface LinkedDocumentState {
@@ -207,5 +232,6 @@ export const LIMITS = {
   fields: 40,
   links: 3,
   resources: 300,
+  components: 30,
   urlLength: 2048,
 } as const;

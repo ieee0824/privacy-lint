@@ -6,6 +6,7 @@ import { sanitizeText } from "../privacy/sanitizer";
 import { authorText } from "./dom-text";
 import { discoverLinks } from "./document-links";
 import { observeForm, primarySensitiveGroup } from "./form-scanner";
+import { collectComponents } from "./component-scanner";
 import { collectResourceOrigins } from "./resource-scanner";
 import type { ControlRegistry } from "./control-registry";
 
@@ -39,5 +40,6 @@ export function buildObservation(
     form: observeForm(group, pageUrl),
     links: discoverLinks(doc),
     resources: collectResourceOrigins(doc, perf),
+    components: collectComponents(doc, perf),
   };
 }
