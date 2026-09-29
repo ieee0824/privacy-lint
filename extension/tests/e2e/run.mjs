@@ -130,6 +130,14 @@ async function chromeDriver() {
   const extensionId = new URL(worker.url()).host;
   // Static e2e host permissions: wait until the background has registered the content script.
   await waitFor(() => worker.evaluate(async () => (await chrome.scripting.getRegisteredContentScripts()).length > 0), 10000, "content script registration");
+  // Onboarding opens the options page on install and may reuse a blank tab; wait for it so it
+  // cannot interrupt the scenario's first navigation.
+  const onboarding = await waitFor(
+    () => context.pages().some((p) => p.url() === `chrome-extension://${extensionId}/options.html`),
+    10000,
+    "onboarding options page",
+  ).catch(() => false);
+  check("chrome: options page opens on install (onboarding)", onboarding === true);
   return {
     name: "chrome",
     async open(url) {
