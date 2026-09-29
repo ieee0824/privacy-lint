@@ -5,10 +5,10 @@
 import { ext } from "../shared/browser";
 import type { ContentMessage, PopupMessage, TabStatusResponse } from "../shared/messages";
 import { validatePageObservation } from "../shared/validate";
-import { assessTab, forgetObservation, markFocused, recallObservation, rememberObservation } from "./assessment";
+import { assessTab, forgetTab, markFocused, recallObservation, rememberObservation, resetTab } from "./assessment";
 import { clearCache, pruneExpired } from "./cache";
 import { grantedMatchPatterns, injectIntoPermittedTabs, permissionFor, syncContentScripts } from "./permissions";
-import { clearTabStatus, getTabStatus } from "./tab-state";
+import { getTabStatus } from "./tab-state";
 
 type Sender = chrome.runtime.MessageSender;
 
@@ -31,6 +31,8 @@ async function handleContent(message: ContentMessage, sender: Sender): Promise<v
     await assessTab(tabId, observation);
   } else if (message.type === "sensitive-focus") {
     await markFocused(tabId);
+  } else if (message.type === "form-gone") {
+    await resetTab(tabId);
   }
 }
 
@@ -58,7 +60,7 @@ ext.runtime.onMessage.addListener((message: unknown, sender: Sender, sendRespons
   if (!isFromOwnExtension(sender) || typeof message !== "object" || message === null) return false;
   const type = (message as { type?: unknown }).type;
 
-  if (sender.tab && (type === "observation" || type === "sensitive-focus")) {
+  if (sender.tab && (type === "observation" || type === "sensitive-focus" || type === "form-gone")) {
     handleContent(message as ContentMessage, sender).catch(() => undefined);
     return false;
   }
@@ -77,15 +79,14 @@ ext.runtime.onMessage.addListener((message: unknown, sender: Sender, sendRespons
 });
 
 ext.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === "loading") {
-    clearTabStatus(tabId).catch(() => undefined);
-    forgetObservation(tabId).catch(() => undefined);
-  }
+  // A new document is loading: any running or finished assessment belongs to the old page.
+  if (changeInfo.status === "loading") resetTab(tabId).catch(() => undefined);
 });
 
 ext.tabs.onRemoved.addListener((tabId) => {
-  clearTabStatus(tabId).catch(() => undefined);
-  forgetObservation(tabId).catch(() => undefined);
+  resetTab(tabId)
+    .catch(() => undefined)
+    .finally(() => forgetTab(tabId));
 });
 
 ext.permissions.onAdded.addListener(async (permissions) => {
