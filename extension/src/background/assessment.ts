@@ -23,7 +23,7 @@ import { OPERATOR_KEYWORDS, PRIVACY_KEYWORDS, extractExcerpts, htmlToBlocks } fr
 import { relationOf, summarizeThirdParty } from "./network-observer";
 import { requestAssessment } from "./relay-client";
 import { loadSettings, type Settings } from "./settings";
-import { getTabStatus, setTabStatus } from "./tab-state";
+import { clearTabStatus, getTabStatus, setTabStatus } from "./tab-state";
 
 export interface Deps {
   fetchImpl: typeof fetch;
@@ -50,6 +50,21 @@ export async function forgetObservation(tabId: number): Promise<void> {
   await ext.storage.session.remove(observationKey(tabId));
 }
 
+/**
+ * Forgets everything about the tab's current page: invalidates any assessment still
+ * running for it (so a late result cannot be written back), then clears the observation,
+ * status and badge. Used on navigation, tab close and when the reported form disappears.
+ */
+export async function resetTab(tabId: number): Promise<void> {
+  generations.set(tabId, (generations.get(tabId) ?? 0) + 1);
+  await Promise.all([clearTabStatus(tabId), forgetObservation(tabId)]);
+}
+
+/** Drops the per-tab counter once the tab is gone. */
+export function forgetTab(tabId: number): void {
+  generations.delete(tabId);
+}
+
 export async function assessTab(
   tabId: number,
   observation: PageObservation,
@@ -67,16 +82,19 @@ export async function assessTab(
   if (!options.force) {
     const cached = await getCached(keyHash, deps.now());
     if (cached) {
-      if (isCurrent()) await finish(tabId, cached, focused, settings);
+      await finish(tabId, cached, focused, settings, isCurrent);
       return;
     }
   }
 
+  // Every write is preceded by a currency check: resetTab() may run during any await.
+  if (!isCurrent()) return;
   await setTabStatus(tabId, { kind: "assessing", focused });
   const assessment = await evaluate(observation, settings, deps);
   if (!isCurrent()) return;
   await putCached(keyHash, assessment);
-  await finish(tabId, assessment, await wasFocused(tabId), settings);
+  const focusedNow = await wasFocused(tabId);
+  await finish(tabId, assessment, focusedNow, settings, isCurrent);
 }
 
 export async function evaluate(observation: PageObservation, settings: Settings, deps: Deps): Promise<Assessment> {
@@ -180,7 +198,14 @@ async function wasFocused(tabId: number): Promise<boolean> {
   return status.kind !== "idle" && status.focused;
 }
 
-async function finish(tabId: number, assessment: Assessment, focused: boolean, settings: Settings): Promise<void> {
+async function finish(
+  tabId: number,
+  assessment: Assessment,
+  focused: boolean,
+  settings: Settings,
+  isCurrent: () => boolean,
+): Promise<void> {
+  if (!isCurrent()) return;
   await setTabStatus(tabId, { kind: "done", focused, assessment });
   if (focused) await maybeNotify(tabId, assessment, settings);
 }

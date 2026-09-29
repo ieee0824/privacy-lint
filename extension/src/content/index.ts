@@ -6,8 +6,7 @@ import type { ContentMessage, ContentNotice } from "../shared/messages";
 import { showNotice } from "../ui/warning";
 import { ControlRegistry } from "./control-registry";
 import { watchForFormChanges } from "./mutation-observer";
-import { observationSignature } from "../shared/signature";
-import { buildObservation } from "./page-observer";
+import { createReporter } from "./reporter";
 import { installFocusTrigger } from "./ui-trigger";
 
 const LOADED = Symbol.for("privacy-lint.content-loaded");
@@ -22,22 +21,7 @@ function main(): void {
   const registry = new ControlRegistry();
   registry.addFrom(document);
 
-  let lastSignature = "";
-  let lastHref = location.href;
-  const report = () => {
-    // Same-document navigation (SPA routing) clears the tab status in the background.
-    if (location.href !== lastHref) {
-      lastHref = location.href;
-      lastSignature = "";
-    }
-    registry.prune();
-    const observation = buildObservation(document, registry, performance);
-    if (!observation) return;
-    const signature = observationSignature(observation);
-    if (signature === lastSignature) return;
-    lastSignature = signature;
-    send({ type: "observation", observation });
-  };
+  const report = createReporter(document, registry, send, performance);
 
   report();
   watchForFormChanges(document, registry, report);
