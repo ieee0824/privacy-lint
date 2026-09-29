@@ -27,6 +27,7 @@ export function createReporter(
       lastSignature = "";
     }
     registry.prune();
+    registry.refresh();
     const observation = buildObservation(doc, registry, perf);
     if (!observation) {
       if (reported) send({ type: "form-gone" });

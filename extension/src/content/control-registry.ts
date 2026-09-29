@@ -28,6 +28,15 @@ export class ControlRegistry {
     return foundSensitive;
   }
 
+  /** Re-reads labels and attributes of known controls (they may change after classification). */
+  refresh(): void {
+    for (const el of Array.from(this.controls.keys())) {
+      const classified = describeControl(el as HTMLInputElement);
+      if (classified) this.controls.set(el, classified);
+      else this.controls.delete(el);
+    }
+  }
+
   prune(): void {
     for (const el of this.controls.keys()) {
       if (!el.isConnected) this.controls.delete(el);
