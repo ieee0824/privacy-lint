@@ -1,5 +1,7 @@
 # privacy-lint
 
+[![CI](https://github.com/ieee0824/privacy-lint/actions/workflows/ci.yml/badge.svg)](https://github.com/ieee0824/privacy-lint/actions/workflows/ci.yml)
+
 Webサイトで個人情報を入力する前に、「追加で確認した方がよいか」の材料を提示するブラウザ拡張（Firefox / Chrome）。
 
 サイトが安全か危険かは判定しません。
