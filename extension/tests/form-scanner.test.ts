@@ -113,6 +113,20 @@ describe("form scanning (privacy invariants)", () => {
     expect(() => new FormData()).toThrow(/forbidden/);
   });
 
+  it("uses table and definition-list cells as labels", () => {
+    restore();
+    document.body.innerHTML = `<form><table>
+      <tr><td>お名前</td><td><input name="f1"></td></tr>
+      <tr><th>ご住所</th><td><input name="f2"></td></tr>
+    </table><dl><dt>電話番号</dt><dd><input name="f3"></dd></dl></form>`;
+    restore = trapValueAccess(window);
+    expect(observe()!.form.fields.map((f) => [f.kind, f.label])).toEqual([
+      ["name", "お名前"],
+      ["address", "ご住所"],
+      ["phone", "電話番号"],
+    ]);
+  });
+
   it("skips contenteditable text", () => {
     document.body.innerHTML = `<form><label>氏名<div contenteditable>山田太郎</div><input name="name"></label></form>`;
     expectNoCanary(observe());
