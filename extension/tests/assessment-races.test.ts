@@ -147,6 +147,22 @@ describe("assessment persistence and cancellation", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("retains the opaque form notice identity through background suspension and removes it on reset", async () => {
+    await saveSettings({ ...DEFAULT_SETTINGS, remoteEvaluation: false });
+    const send = vi.spyOn(chrome.tabs, "sendMessage");
+    const noticeKey = '["document-id",2,4]';
+    await acceptObservation(tabId, { ...observation, form: { ...observation.form, actionScheme: "http" } },
+      { focused: true, noticeKey });
+    forgetTab(tabId);
+    vi.stubGlobal("fetch", vi.fn(async () => answer()));
+    await saveSettings({ ...DEFAULT_SETTINGS, remoteEvaluation: true });
+    await evaluationSettingsChanged();
+    expect(send).toHaveBeenLastCalledWith(tabId, expect.objectContaining({ type: "show-notice", signature: noticeKey }), { frameId: 0 });
+    expect(await getTabStatus(tabId)).toMatchObject({ kind: "done", focused: true });
+    await resetTab(tabId);
+    expect(fake.session.has(`context:${tabId}`)).toBe(false);
+  });
+
   it("settings restart retains the newest observation while its persistence is pending", async () => {
     await saveSettings({ ...DEFAULT_SETTINGS, remoteEvaluation: false });
     await acceptObservation(tabId, observation);

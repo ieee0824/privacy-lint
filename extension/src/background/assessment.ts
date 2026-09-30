@@ -2,7 +2,7 @@
  * Assessment pipeline (DESIGN.md §12, §17):
  *   observation → linked-document excerpts → sanitized request → relay/Jev → code composition.
  */
-import type { Assessment, Statuses } from "../shared/assessment";
+import type { Assessment, Statuses, TabStatus } from "../shared/assessment";
 import { WarningLevel } from "../shared/assessment";
 import { ext } from "../shared/browser";
 import type { ContentNotice } from "../shared/messages";
@@ -48,6 +48,7 @@ const tabWrites = new Map<number, Promise<unknown>>();
 let cacheWrites: Promise<unknown> = Promise.resolve();
 const pendingRestores = new Set<Set<number>>();
 const observationKey = (tabId: number) => `obs:${tabId}`;
+const noticeKeyStorageKey = (tabId: number) => `context:${tabId}`;
 
 function stateFor(tabId: number): EvaluationState {
   const stored = states.get(tabId);
@@ -87,8 +88,8 @@ function writeCache<T>(operation: () => Promise<T>): Promise<T> {
   return next;
 }
 
-export async function rememberObservation(tabId: number, observation: PageObservation): Promise<void> {
-  await ext.storage.session.set({ [observationKey(tabId)]: observation });
+export async function rememberObservation(tabId: number, observation: PageObservation, noticeKey?: string): Promise<void> {
+  await ext.storage.session.set({ [observationKey(tabId)]: observation, [noticeKeyStorageKey(tabId)]: noticeKey ?? null });
 }
 
 export async function recallObservation(tabId: number): Promise<PageObservation | null> {
@@ -129,7 +130,7 @@ export async function reassessCurrentTab(tabId: number): Promise<boolean> {
 }
 
 export async function forgetObservation(tabId: number): Promise<void> {
-  await ext.storage.session.remove(observationKey(tabId));
+  await ext.storage.session.remove([observationKey(tabId), noticeKeyStorageKey(tabId)]);
 }
 
 /** Reserve the run before the first await, including observation persistence (#25). */
@@ -137,7 +138,7 @@ export async function acceptObservation(tabId: number, observation: PageObservat
   options: { focused?: boolean; force?: boolean; noticeKey?: string } = {}, deps: Deps = defaultDeps): Promise<void> {
   const execution = begin(tabId, observation, options.focused === true, options.noticeKey);
   await writeTab(tabId, async () => {
-    if (isCurrent(execution)) await rememberObservation(tabId, observation);
+    if (isCurrent(execution)) await rememberObservation(tabId, observation, options.noticeKey);
   });
   if (isCurrent(execution)) await executeAssessment(execution, observation, options, deps);
 }
@@ -185,7 +186,11 @@ function restorePersisted(persisted: Record<string, unknown>, snapshot: Readonly
     if (!/^obs:\d+$/.test(key)) continue;
     const tabId = Number(key.slice(4));
     if (active.has(tabId) || invalidated.has(tabId) || states.get(tabId)?.run !== snapshot.get(tabId)) continue;
-    restarts.push(assessTab(tabId, observation as PageObservation, { force: true }));
+    const storedStatus = persisted[`tab:${tabId}`] as TabStatus | undefined;
+    const noticeKey = persisted[noticeKeyStorageKey(tabId)];
+    restarts.push(acceptObservation(tabId, observation as PageObservation, { force: true,
+      focused: storedStatus !== undefined && storedStatus.kind !== "idle" && storedStatus.focused,
+      noticeKey: typeof noticeKey === "string" ? noticeKey : undefined }));
   }
   return restarts;
 }
@@ -199,7 +204,9 @@ async function restartAfterSettings({ execution: previous, focused }: { executio
 export async function assessTab(tabId: number, observation: PageObservation,
   options: { force?: boolean } = {}, deps: Deps = defaultDeps): Promise<void> {
   const execution = begin(tabId, observation, wasStateFocused(tabId), executions.get(tabId)?.noticeKey);
-  const stored = await getTabStatus(tabId);
+  const [stored, context] = await Promise.all([getTabStatus(tabId), ext.storage.session.get(noticeKeyStorageKey(tabId))]);
+  const noticeKey = context[noticeKeyStorageKey(tabId)];
+  if (isCurrent(execution) && typeof noticeKey === "string") execution.noticeKey = noticeKey;
   if (isCurrent(execution) && stored.kind !== "idle" && stored.focused) {
     states.set(tabId, transitionEvaluation(stateFor(tabId), { type: "focus" }).state);
   }
