@@ -41,6 +41,7 @@ function main(): void {
       return false;
     }
     if (message?.type !== "show-notice") return false;
+    report.refresh(true);
     if (!message.signature || message.signature !== report.signature()) return;
     showNotice(document, message.assessment);
   });

@@ -134,6 +134,19 @@ describe("dynamic classification and mutation plans (#24, #34)", () => {
 });
 
 describe("active form and explicit reporting state (#23, #26, #44)", () => {
+  it("keeps notice identity separate from cache identity and excludes raw URLs", () => {
+    history.replaceState(null, "", "/signup?private=QUERY_CANARY#FRAGMENT_CANARY");
+    const { registry, report, sent } = setup('<form><input type="email"></form>');
+    const key = report.signature();
+    const observation = buildObservation(document, registry, PERF)!;
+    const other = createReporter(document, registry, () => {}, PERF); other();
+    expect(key).not.toBe(other.signature());
+    expect(key).not.toContain("QUERY_CANARY");
+    expect(key).not.toContain("FRAGMENT_CANARY");
+    expect(observationSignature(observation)).toBe(observationSignature(other.refresh().observation!));
+    expect(sent.at(-1)).toMatchObject({ noticeKey: key });
+  });
+
   it("reports the HTTP password form on focus without reading input values", () => {
     const { registry, sent, report } = setup(`<form action="https://safe.example"><input name="name"><input type="email"></form>
       <form action="http://password.example"><input type="password"></form>`);
@@ -203,7 +216,7 @@ describe("resource changes (#27)", () => {
     expect(report.signature()).not.toBe(oldSignature);
     expect(sent).toHaveLength(2);
     document.body.innerHTML = "";
-    expect(report.refresh()).toEqual({ observation: null, focused: false });
+    expect(report.refresh()).toEqual({ observation: null, focused: false, noticeKey: "" });
   });
 
   it("automatically reports 0 to 14 third-party scripts and retains equal summaries", async () => {
