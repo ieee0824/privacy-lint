@@ -42,7 +42,7 @@ export function transitionReporter(previous: Readonly<ReporterState>, event: Rea
   const focused = event.focused || (!changedPage && previous.focused);
   const clearNotice = changedPage || signature !== previous.signature;
   const revision = previous.revision + Number(clearNotice);
-  const noticeKey = signature ? JSON.stringify([previous.documentId, event.lifecycle, revision, signature]) : "";
+  const noticeKey = signature ? JSON.stringify([previous.documentId, event.lifecycle, revision]) : "";
   const state = { documentId: previous.documentId, href: event.href, signature, noticeKey, revision, lifecycle: event.lifecycle, focused };
   if (!event.observation) {
     return { state: { ...state, focused: false }, clearNotice, message: previous.signature ? { type: "form-gone" } : undefined };

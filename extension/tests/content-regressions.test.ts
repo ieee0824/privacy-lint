@@ -134,6 +134,20 @@ describe("dynamic classification and mutation plans (#24, #34)", () => {
 });
 
 describe("active form and explicit reporting state (#23, #26, #44)", () => {
+  it("uses an opaque notice key and increments its revision when observation changes", () => {
+    const { report } = setup('<h1>AUTHOR_TEXT_CANARY</h1><form><input type="email"></form>');
+    const previous = JSON.parse(report.signature()) as [string, number, number];
+    expect(previous).toHaveLength(3);
+    expect(report.signature()).not.toContain("AUTHOR_TEXT_CANARY");
+    document.querySelector("h1")!.textContent = "CHANGED_AUTHOR_TEXT_CANARY";
+    report();
+    const current = JSON.parse(report.signature()) as [string, number, number];
+    expect(current.slice(0, 2)).toEqual(previous.slice(0, 2));
+    expect(current[2]).toBe(previous[2] + 1);
+    expect(report.signature()).not.toContain("CHANGED_AUTHOR_TEXT_CANARY");
+    expect(report.refresh().noticeKey).toBe(JSON.stringify(current));
+  });
+
   it("keeps notice identity separate from cache identity and excludes raw URLs", () => {
     history.replaceState(null, "", "/signup?private=QUERY_CANARY#FRAGMENT_CANARY");
     const { registry, report, sent } = setup('<form><input type="email"></form>');
