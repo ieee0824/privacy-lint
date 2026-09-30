@@ -49,12 +49,21 @@ const PAPER = [255, 255, 255];
 const INK = [148, 163, 184];
 const RING = [15, 23, 42];
 
+function inRoundRect(u, v, x0, y0, x1, y1, r) {
+  const cx = Math.min(Math.max(u, x0 + r), x1 - r);
+  const cy = Math.min(Math.max(v, y0 + r), y1 - r);
+  return (u - cx) ** 2 + (v - cy) ** 2 <= r * r && u >= x0 && u <= x1 && v >= y0 && v <= y1;
+}
+
+function paperColor(u, v, px) {
+  const thickness = Math.max(0.03, 0.7 / px);
+  for (const lineY of [0.26, 0.38, 0.5]) {
+    if (Math.abs(v - lineY) < thickness && u > 0.26 && u < 0.58) return [...INK, 255];
+  }
+  return [...PAPER, 255];
+}
+
 function sample(u, v, px) {
-  const inRoundRect = (x0, y0, x1, y1, r) => {
-    const cx = Math.min(Math.max(u, x0 + r), x1 - r);
-    const cy = Math.min(Math.max(v, y0 + r), y1 - r);
-    return (u - cx) ** 2 + (v - cy) ** 2 <= r * r && u >= x0 && u <= x1 && v >= y0 && v <= y1;
-  };
   const d = Math.hypot(u - 0.64, v - 0.64);
   const t = Math.max(0.07, 1.5 / px);
   if (d >= 0.17 && d <= 0.17 + t) return [...RING, 255];
@@ -63,11 +72,8 @@ function sample(u, v, px) {
   const across = Math.abs(u - 0.64 - (v - 0.64)) / Math.SQRT2;
   if (along > 0.2 && along < 0.4 && across < t * 0.8) return [...RING, 255];
   if (d < 0.17) return [...PAPER, 235];
-  if (inRoundRect(0.18, 0.12, 0.66, 0.78, 0.05)) {
-    for (const ly of [0.26, 0.38, 0.5]) if (Math.abs(v - ly) < Math.max(0.03, 0.7 / px) && u > 0.26 && u < 0.58) return [...INK, 255];
-    return [...PAPER, 255];
-  }
-  if (inRoundRect(0, 0, 1, 1, 0.2)) return [...BG, 255];
+  if (inRoundRect(u, v, 0.18, 0.12, 0.66, 0.78, 0.05)) return paperColor(u, v, px);
+  if (inRoundRect(u, v, 0, 0, 1, 1, 0.2)) return [...BG, 255];
   return [0, 0, 0, 0];
 }
 

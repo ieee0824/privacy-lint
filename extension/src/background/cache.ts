@@ -41,16 +41,30 @@ export function cacheKeyInput(origin: string, observationSignature: string, sett
   return `${origin}\n${observationSignature}\n${settingsFingerprint}`;
 }
 
+export type CacheValidity = "valid" | "expired" | "incompatible" | "not-cacheable";
+
+/** Shared policy for reads and pruning; the expiry boundary remains inclusive. */
+export function cacheValidity(entry: Readonly<CachedAssessment>, now: number): CacheValidity {
+  if (entry.schemaVersion !== SCHEMA_VERSION) return "incompatible";
+  const ttl = ttlFor(entry.assessment);
+  if (ttl === null) return "not-cacheable";
+  return now - entry.assessedAt > ttl ? "expired" : "valid";
+}
+
+export function expiredCacheKeys(entries: Readonly<Record<string, unknown>>, now: number): string[] {
+  return Object.entries(entries)
+    .filter(([key]) => key.startsWith(PREFIX))
+    .filter(([, entry]) => cacheValidity(entry as CachedAssessment, now) !== "valid")
+    .map(([key]) => key);
+}
+
 export async function getCached(keyHash: string, now: number): Promise<Assessment | null> {
   const key = PREFIX + keyHash;
   const entry = (await ext.storage.local.get(key))[key] as CachedAssessment | undefined;
-  if (!entry || entry.schemaVersion !== SCHEMA_VERSION) return null;
-  const ttl = ttlFor(entry.assessment);
-  if (ttl === null || now - entry.assessedAt > ttl) {
-    await ext.storage.local.remove(key);
-    return null;
-  }
-  return entry.assessment;
+  if (!entry) return null;
+  if (cacheValidity(entry, now) === "valid") return entry.assessment;
+  await ext.storage.local.remove(key);
+  return null;
 }
 
 export async function putCached(keyHash: string, assessment: Assessment): Promise<void> {
@@ -68,14 +82,7 @@ export async function putCached(keyHash: string, assessment: Assessment): Promis
 
 export async function pruneExpired(now: number): Promise<void> {
   const all = await ext.storage.local.get(null);
-  const expired = Object.entries(all)
-    .filter(([key]) => key.startsWith(PREFIX))
-    .filter(([, value]) => {
-      const entry = value as CachedAssessment;
-      const ttl = ttlFor(entry.assessment);
-      return entry.schemaVersion !== SCHEMA_VERSION || ttl === null || now - entry.assessedAt > ttl;
-    })
-    .map(([key]) => key);
+  const expired = expiredCacheKeys(all, now);
   if (expired.length) await ext.storage.local.remove(expired);
 }
 
