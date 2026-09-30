@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -87,22 +86,9 @@ func isExtensionOrigin(origin string) bool {
 }
 
 func (s *Server) assess(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "method not allowed"})
-		return
-	}
-	// A web page could send a "simple" cross-origin POST without preflight; requiring
-	// application/json forces a preflight that withCORS rejects for non-extension origins.
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-		writeJSON(w, http.StatusUnsupportedMediaType, errorResponse{Error: "content type must be application/json"})
-		return
-	}
-	if origin := r.Header.Get("Origin"); origin != "" && !isExtensionOrigin(origin) {
-		writeJSON(w, http.StatusForbidden, errorResponse{Error: "origin not allowed"})
-		return
-	}
-	if s.Bearer != "" && !validBearer(r.Header.Get("Authorization"), s.Bearer) {
-		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
+	problem := assessRequestProblem(r.Method, r.Header.Get("Content-Type"), r.Header.Get("Origin"), r.Header.Get("Authorization"), s.Bearer)
+	if problem != nil {
+		writeJSON(w, problem.Status, problem.Body)
 		return
 	}
 	if !s.Limiter.Allow(r) {
@@ -112,42 +98,37 @@ func (s *Server) assess(w http.ResponseWriter, r *http.Request) {
 
 	req, err := validation.Decode(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		var invalid *validation.Error
-		switch {
-		case errors.As(err, &tooLarge):
-			writeJSON(w, http.StatusRequestEntityTooLarge, errorResponse{Error: "payload too large"})
-		case errors.As(err, &invalid):
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: invalid.Reason, Field: invalid.Path})
-		default:
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request"})
-		}
+		problem := decodeProblem(err)
+		writeJSON(w, problem.Status, problem.Body)
 		return
 	}
 	logging.FieldsFrom(r.Context()).SchemaVersion = req.SchemaVersion
 
-	questions := jev.QuestionsFor(&req.Website)
-	if len(questions) == 0 {
-		writeJSON(w, http.StatusOK, assessResponse{SchemaVersion: validation.SchemaVersion, Answers: map[string]jev.Answer{}})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), s.timeout())
-	defer cancel()
-	res, err := s.Jev.Evaluate(ctx, jev.State(&req.Website), questions)
+	res, err := s.evaluate(r.Context(), req)
 	if err != nil {
 		// Never degrade to an empty or default answer set: the extension must see the failure.
 		writeJSON(w, http.StatusBadGateway, errorResponse{Error: "evaluation unavailable"})
 		return
 	}
 
-	answers := make(map[string]jev.Answer, len(questions))
-	for id := range questions {
-		if a, ok := res.Answers[id]; ok && a.Type == questions[id].Type {
-			answers[id] = a
-		}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) evaluate(ctx context.Context, req *validation.AssessRequest) (assessResponse, error) {
+	questions := jev.QuestionsFor(&req.Website)
+	if len(questions) == 0 {
+		return selectAnswers(questions, &jev.Response{}), nil
 	}
-	writeJSON(w, http.StatusOK, assessResponse{SchemaVersion: validation.SchemaVersion, Model: res.Model, Answers: answers})
+	ctx, cancel := context.WithTimeout(ctx, s.timeout())
+	defer cancel()
+	res, err := s.Jev.Evaluate(ctx, jev.State(&req.Website), questions)
+	if err != nil {
+		return assessResponse{}, err
+	}
+	if res == nil {
+		return assessResponse{}, jev.ErrUnavailable
+	}
+	return selectAnswers(questions, res), nil
 }
 
 func (s *Server) timeout() time.Duration {

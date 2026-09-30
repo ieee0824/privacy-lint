@@ -51,7 +51,9 @@ privacy-lint が「何を読み、何を送り、何を保存するか」の一�
 
 ## Privacy Relay が保持しないもの
 
-request body、Jev への入力、URL、IP アドレス（rate limit 用にメモリ上で 1 分間のみ保持）、User-Agent。
+request body、Jev への入力、URL、IP アドレス、User-Agent。
+IP アドレスは rate limit 用にメモリ上で現在の1分ウィンドウの間だけ保持し、ウィンドウ終了時にタイマーで削除する。
+新しいアクセスがなくても削除し、Relay の停止時にも rate limiter を解放する。
 アクセスログは request ID・既知ルート名・status・latency・schema version・byte 数のみ（`relay/internal/logging`）。
 
 ## 権限

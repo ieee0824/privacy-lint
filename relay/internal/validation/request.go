@@ -148,34 +148,58 @@ func requireKeys(raw []byte) error {
 	if err := json.Unmarshal(raw, &top); err != nil {
 		return fail("body", "malformed JSON")
 	}
-	required := map[string][]string{
-		"":                      {"schemaVersion", "website"},
-		"website":               {"page", "form", "privacyPolicy", "operatorInfo", "thirdParty"},
-		"website.page":          {"origin", "scheme", "pathClass", "headings"},
-		"website.form":          {"method", "crossOriginAction", "crossSiteAction", "fields", "context"},
-		"website.privacyPolicy": {"found", "fetched", "excerpts"},
-		"website.operatorInfo":  {"found", "fetched", "excerpts"},
-		"website.thirdParty":    {"totalOrigins", "scriptOrigins", "iframeOrigins"},
+	rules := requiredObjectRules()
+	objects, err := requiredObjects(top, rules)
+	if err != nil {
+		return err
 	}
+	for _, rule := range rules {
+		if err := requireObjectKeys(objects[rule.path], rule.path, rule.keys); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type objectRule struct {
+	path string
+	keys []string
+}
+
+func requiredObjectRules() []objectRule {
+	return []objectRule{
+		{"", []string{"schemaVersion", "website"}},
+		{"website", []string{"page", "form", "privacyPolicy", "operatorInfo", "thirdParty"}},
+		{"website.page", []string{"origin", "scheme", "pathClass", "headings"}},
+		{"website.form", []string{"method", "crossOriginAction", "crossSiteAction", "fields", "context"}},
+		{"website.privacyPolicy", []string{"found", "fetched", "excerpts"}},
+		{"website.operatorInfo", []string{"found", "fetched", "excerpts"}},
+		{"website.thirdParty", []string{"totalOrigins", "scriptOrigins", "iframeOrigins"}},
+	}
+}
+
+func requiredObjects(top map[string]json.RawMessage, rules []objectRule) (map[string]map[string]json.RawMessage, error) {
 	objects := map[string]map[string]json.RawMessage{"": top}
-	for _, path := range []string{"website", "website.page", "website.form", "website.privacyPolicy", "website.operatorInfo", "website.thirdParty"} {
-		parent, key := splitPath(path)
+	for _, rule := range rules[1:] {
+		parent, key := splitPath(rule.path)
 		obj, ok := objects[parent]
 		if !ok {
-			return fail(parent, "missing")
+			return nil, fail(parent, "missing")
 		}
 		var child map[string]json.RawMessage
 		if err := json.Unmarshal(obj[key], &child); err != nil || child == nil {
-			return fail(path, "expected object")
+			return nil, fail(rule.path, "expected object")
 		}
-		objects[path] = child
+		objects[rule.path] = child
 	}
-	for path, keys := range required {
-		for _, k := range keys {
-			v, ok := objects[path][k]
-			if !ok || string(v) == "null" {
-				return fail(join(path, k), "required")
-			}
+	return objects, nil
+}
+
+func requireObjectKeys(object map[string]json.RawMessage, path string, keys []string) error {
+	for _, key := range keys {
+		value, ok := object[key]
+		if !ok || string(value) == "null" {
+			return fail(join(path, key), "required")
 		}
 	}
 	return nil
