@@ -55,20 +55,29 @@ function signalsOf(el: Control): FieldSignals {
 }
 
 function labelOf(el: Control): string | undefined {
+  return firstLabel(readLabelCandidates(el));
+}
+
+export function firstLabel(candidates: readonly (string | undefined)[]): string | undefined {
+  return candidates.find(Boolean);
+}
+
+function labelledByText(el: Control): string | undefined {
+  const id = el.getAttribute("aria-labelledby")?.trim().split(/\s+/)[0];
+  if (!id) return undefined;
+  const target = el.ownerDocument.getElementById(id);
+  return target ? authorText(target, LIMITS.labelText) || undefined : undefined;
+}
+
+function readLabelCandidates(el: Control): (string | undefined)[] {
   const labels = el.labels;
-  if (labels && labels.length > 0) {
-    const text = authorText(labels[0]!, LIMITS.labelText);
-    if (text) return text;
-  }
-  const labelledBy = el.getAttribute("aria-labelledby");
-  if (labelledBy) {
-    const target = el.ownerDocument.getElementById(labelledBy.split(/\s+/)[0] ?? "");
-    if (target) {
-      const text = authorText(target, LIMITS.labelText);
-      if (text) return text;
-    }
-  }
-  return attrText(el, "aria-label", LIMITS.labelText) ?? attrText(el, "title", LIMITS.labelText) ?? layoutLabelOf(el);
+  return [
+    labels?.[0] ? authorText(labels[0], LIMITS.labelText) : undefined,
+    labelledByText(el),
+    attrText(el, "aria-label", LIMITS.labelText),
+    attrText(el, "title", LIMITS.labelText),
+    layoutLabelOf(el),
+  ];
 }
 
 /**
@@ -133,7 +142,8 @@ function submissionTarget(
 ): { origin?: string; scheme: Scheme | "none" } {
   if (!form) return { scheme: "none" };
   // A submit button's formaction overrides the form's action.
-  const submitter = form.querySelector("button[formaction], input[formaction]");
+  const submitter = Array.from(form.ownerDocument.querySelectorAll<HTMLButtonElement | HTMLInputElement>("button[formaction], input[formaction]"))
+    .find(el => el.form === form && isSubmitter(el.tagName, el.getAttribute("type"), el.matches(":disabled")));
   const raw = submitter?.getAttribute("formaction") ?? form.getAttribute("action") ?? "";
   let url: URL;
   try {
@@ -144,6 +154,13 @@ function submissionTarget(
   const scheme = schemeOf(url);
   const origin = parseHttpUrl(url.href) ? originOf(url.href) ?? undefined : undefined;
   return origin ? { origin, scheme } : { scheme };
+}
+
+export function isSubmitter(tag: string, rawType: string | null, disabled: boolean): boolean {
+  if (disabled) return false;
+  const type = rawType?.toLowerCase() ?? "";
+  if (tag === "INPUT") return type === "submit" || type === "image";
+  return tag === "BUTTON" && type !== "button" && type !== "reset";
 }
 
 function formContext(form: HTMLFormElement | null, group: FormGroup): string[] {

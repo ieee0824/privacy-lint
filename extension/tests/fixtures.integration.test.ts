@@ -153,8 +153,10 @@ describe("fixtures (DESIGN.md §34)", () => {
     expect(buildObservation(document, registry, undefined)).toBeNull();
 
     const detected = new Promise<void>((resolve) => {
-      watchForFormChanges(document, registry, () => {
-        if (buildObservation(document, registry, undefined)) resolve();
+      const observer = watchForFormChanges(document, registry, () => {
+        if (!buildObservation(document, registry, undefined)) return;
+        observer.disconnect();
+        resolve();
       });
     });
     // What the page's own script does after 1.5 s.

@@ -5,7 +5,7 @@ import { classifyPath, schemeOf } from "../privacy/url-sanitizer";
 import { sanitizeText } from "../privacy/sanitizer";
 import { authorText } from "./dom-text";
 import { discoverLinks } from "./document-links";
-import { observeForm, primarySensitiveGroup } from "./form-scanner";
+import { observeForm } from "./form-scanner";
 import { collectComponents } from "./component-scanner";
 import { collectResourceOrigins } from "./resource-scanner";
 import type { ControlRegistry } from "./control-registry";
@@ -15,7 +15,7 @@ export function buildObservation(
   registry: ControlRegistry,
   perf?: Pick<Performance, "getEntriesByType">,
 ): PageObservation | null {
-  const group = primarySensitiveGroup(registry.groups());
+  const group = registry.selectedGroup();
   if (!group) return null;
 
   const pageUrl = new URL(doc.URL);
