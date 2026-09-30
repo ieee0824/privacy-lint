@@ -26,6 +26,8 @@ function readableTextNode(node: Node): boolean {
 
 export function authorText(root: Node, maxLength: number): string {
   const doc = root.ownerDocument ?? (root as Document);
+  // A whole-document editing host can contain entered text without CE attributes.
+  if (doc.designMode?.toLowerCase() === "on") return "";
   const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: node => readableTextNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
   });

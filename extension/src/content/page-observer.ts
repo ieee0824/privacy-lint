@@ -2,7 +2,6 @@
 import type { PageObservation } from "../shared/schema";
 import { LIMITS, SCHEMA_VERSION } from "../shared/schema";
 import { classifyPath, schemeOf } from "../privacy/url-sanitizer";
-import { sanitizeText } from "../privacy/sanitizer";
 import { authorText } from "./dom-text";
 import { discoverLinks } from "./document-links";
 import { observeForm } from "./form-scanner";
@@ -28,7 +27,8 @@ export function buildObservation(
       .map((h) => authorText(h, LIMITS.shortText))
       .filter(Boolean),
   };
-  const title = sanitizeText(doc.title ?? "", LIMITS.shortText);
+  const titleEl = doc.querySelector("title");
+  const title = titleEl ? authorText(titleEl, LIMITS.shortText) : "";
   if (title) page.title = title;
   const footerEl = doc.querySelector("footer, [role=contentinfo]");
   const footer = footerEl ? authorText(footerEl, LIMITS.footerText) : "";

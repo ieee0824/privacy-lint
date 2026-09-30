@@ -42,6 +42,44 @@ function setup(html: string) {
 }
 
 describe("editable text privacy (#20)", () => {
+  it("never reads whole-document editable text, including title, headings, labels and footer", async () => {
+    document.body.innerHTML = '<h1>CANARY氏名</h1><form><label>CANARY氏名<input type="email"></label></form><footer>CANARY氏名</footer>';
+    const title = document.createElement("title");
+    title.textContent = "CANARY氏名";
+    document.head.append(title);
+    const original = Object.getOwnPropertyDescriptor(document, "designMode");
+    Object.defineProperty(document, "designMode", { configurable: true, value: "on" });
+    try {
+      for (const element of document.querySelectorAll("title, h1, label, footer")) {
+        Object.defineProperty(element.firstChild!, "nodeValue", { get() { throw Error("editable text read"); } });
+      }
+      const registry = new ControlRegistry();
+      registry.addFrom(document);
+      const observation = buildObservation(document, registry, PERF)!;
+      const { request } = await buildRequest(observation, false, unusedFetch);
+      expect(observation.page.headings).toEqual([]);
+      expect(observation.page.title).toBeUndefined();
+      expect(observation.page.footer).toBeUndefined();
+      expect(JSON.stringify(request)).not.toContain("CANARY");
+    } finally {
+      title.remove();
+      if (original) Object.defineProperty(document, "designMode", original);
+      else Reflect.deleteProperty(document, "designMode");
+    }
+  });
+
+  it("uses the author-text boundary for an explicitly editable title", () => {
+    const title = document.createElement("title");
+    title.setAttribute("contenteditable", "true");
+    title.textContent = "CANARY氏名";
+    document.head.append(title);
+    try {
+      const { registry } = setup('<form><input type="email"></form>');
+      expect(buildObservation(document, registry, PERF)!.page.title).toBeUndefined();
+    } finally {
+      title.remove();
+    }
+  });
   it.each([
     '<h1 contenteditable="true">CANARY氏名</h1>',
     '<div contenteditable="true"><h1>CANARY氏名</h1></div>',
