@@ -39,15 +39,16 @@ export function passesLuhn(digits: string): boolean {
   let sum = 0;
   let double = false;
   for (let i = digits.length - 1; i >= 0; i--) {
-    let d = digits.charCodeAt(i) - 48;
-    if (double) {
-      d *= 2;
-      if (d > 9) d -= 9;
-    }
-    sum += d;
+    sum += luhnDigit(digits.charCodeAt(i) - 48, double);
     double = !double;
   }
   return sum % 10 === 0;
+}
+
+function luhnDigit(digit: number, double: boolean): number {
+  if (!double) return digit;
+  const doubled = digit * 2;
+  return doubled > 9 ? doubled - 9 : doubled;
 }
 
 function truncate(text: string, maxLength: number): string {

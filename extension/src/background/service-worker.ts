@@ -5,7 +5,7 @@
 import { ext } from "../shared/browser";
 import type { ContentMessage, PopupMessage, TabStatusResponse } from "../shared/messages";
 import { validatePageObservation } from "../shared/validate";
-import { assessTab, forgetTab, markFocused, recallObservation, rememberObservation, resetTab } from "./assessment";
+import { acceptObservation, evaluationSettingsChanged, forgetTab, markFocused, reassessCurrentTab, resetTab } from "./assessment";
 import { clearCache, pruneExpired } from "./cache";
 import { grantedMatchPatterns, injectIntoPermittedTabs, permissionFor, syncContentScripts } from "./permissions";
 import { SETTINGS_KEY, evaluationFingerprint, type Settings } from "./settings";
@@ -28,8 +28,7 @@ async function handleContent(message: ContentMessage, sender: Sender): Promise<v
     const observation = validatePageObservation(message.observation);
     // The observation must describe the page that sent it.
     if (!sender.url || new URL(sender.url).origin !== observation.page.origin) return;
-    await rememberObservation(tabId, observation);
-    await assessTab(tabId, observation);
+    await acceptObservation(tabId, observation, { focused: (message as { focused?: unknown }).focused === true });
   } else if (message.type === "sensitive-focus") {
     await markFocused(tabId);
   } else if (message.type === "form-gone") {
@@ -47,9 +46,7 @@ async function handlePopup(message: PopupMessage): Promise<TabStatusResponse | {
       return response;
     }
     case "reassess": {
-      const observation = await recallObservation(message.tabId);
-      if (observation) await assessTab(message.tabId, observation, { force: true });
-      return { ok: observation !== null };
+      return { ok: await reassessCurrentTab(message.tabId) };
     }
     case "clear-cache":
       await clearCache();
@@ -118,7 +115,7 @@ ext.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !change) return;
   const before = evaluationFingerprint(change.oldValue as Partial<Settings> | undefined);
   const after = evaluationFingerprint(change.newValue as Partial<Settings> | undefined);
-  if (before !== after) clearCache().catch(() => undefined);
+  if (before !== after) evaluationSettingsChanged().catch(() => undefined);
 });
 
 ext.runtime.onStartup.addListener(() => {

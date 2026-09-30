@@ -66,6 +66,8 @@ const DATE_KEYWORDS = /改定|制定|更新|施行|最終|updated|effective|revi
 const YEAR = /(19|20)\d{2}/;
 
 export function extractExcerpts(doc: DocumentText, keywords: RegExp): string[] {
+  // Keywords are a predicate per block, independent of caller state or previous blocks.
+  const predicate = new RegExp(keywords.source, keywords.flags.replace(/[gy]/g, ""));
   const out: string[] = [];
   let total = 0;
   const push = (text: string) => {
@@ -78,7 +80,7 @@ export function extractExcerpts(doc: DocumentText, keywords: RegExp): string[] {
   const blocks = doc.blocks;
   for (let i = 0; i < blocks.length && out.length < LIMITS.excerptsPerDocument - 2 && total < 3000; i++) {
     const block = blocks[i]!;
-    if (!keywords.test(block)) continue;
+    if (!predicate.test(block)) continue;
     // Short matching blocks are usually headings; include the paragraph that follows.
     push(block.length < 40 && blocks[i + 1] ? `${block} ${blocks[i + 1]}` : block);
   }
