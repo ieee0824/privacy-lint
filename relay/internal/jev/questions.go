@@ -116,7 +116,44 @@ func QuestionsFor(w *validation.Website) map[string]Question {
 	if len(w.PrivacyPolicy.Excerpts) > 0 || len(w.OperatorInfo.Excerpts) > 0 {
 		qs[QMaintenanceSignals] = maintenanceSignals
 	}
-	return qs
+	return copyQuestions(qs)
+}
+
+func copyQuestions(templates map[string]Question) map[string]Question {
+	questions := make(map[string]Question, len(templates))
+	for id, question := range templates {
+		question.Instructions = copyQuestionValue(question.Instructions)
+		question.Criteria = copyQuestionValue(question.Criteria)
+		questions[id] = question
+	}
+	return questions
+}
+
+func copyQuestionValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		copy := make(map[string]any, len(value))
+		for key, child := range value {
+			copy[key] = copyQuestionValue(child)
+		}
+		return copy
+	case map[string]string:
+		copy := make(map[string]string, len(value))
+		for key, text := range value {
+			copy[key] = text
+		}
+		return copy
+	case []string:
+		return append([]string(nil), value...)
+	case []any:
+		copy := make([]any, len(value))
+		for index, child := range value {
+			copy[index] = copyQuestionValue(child)
+		}
+		return copy
+	default:
+		return value
+	}
 }
 
 // State wraps the validated, untrusted website data. Nothing else is added.
