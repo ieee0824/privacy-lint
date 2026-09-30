@@ -214,8 +214,7 @@ export async function assessTab(tabId: number, observation: PageObservation,
 }
 
 function wasStateFocused(tabId: number): boolean {
-  const status = stateFor(tabId).status;
-  return status.kind !== "idle" && status.focused;
+  return stateFor(tabId).focused;
 }
 
 async function executeAssessment(execution: Execution, observation: PageObservation,

@@ -220,4 +220,25 @@ describe("assessment persistence and cancellation", () => {
     await resetTab(otherTabId);
     forgetTab(otherTabId);
   });
+
+  it("overlapping settings changes preserve the focused form", async () => {
+    await saveSettings({ ...DEFAULT_SETTINGS, remoteEvaluation: false });
+    await acceptObservation(tabId, observation, { focused: true });
+    const started = deferred();
+    const gate = deferred();
+    const storage = chrome.storage.session;
+    const original = storage.get;
+    let held = false;
+    storage.get = (async (keys: string | string[] | null) => {
+      const result = await original(keys);
+      if (keys === null && !held) { held = true; started.release(); await gate.promise; }
+      return result;
+    }) as typeof storage.get;
+    const first = evaluationSettingsChanged();
+    await started.promise;
+    await evaluationSettingsChanged();
+    gate.release();
+    await first;
+    expect(await getTabStatus(tabId)).toMatchObject({ kind: "done", focused: true });
+  });
 });
