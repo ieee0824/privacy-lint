@@ -226,9 +226,24 @@ go run ./cmd/relay -jev-endpoint http://127.0.0.1:8788/v1/systemone
 | `-addr` | 待ち受けアドレス（既定 `127.0.0.1:8787`） |
 | `-jev-endpoint` / `-jev-model` | Jev のエンドポイント / モデル（既定 `jev-latest`） |
 | `-rate` | クライアントあたりの 1 分間のリクエスト上限（既定 30、0 で無効） |
-| `-trust-proxy` | 信頼できるリバースプロキシの背後でのみ指定（`X-Forwarded-For` を使う） |
+| `-trust-proxy` | `-trusted-proxies` の接続元からのみ `X-Forwarded-For` を使う。両方の指定が必要 |
+| `-trusted-proxies` | 信頼するプロキシの IP CIDR をカンマ区切りで指定（例 `127.0.0.1/32,::1/128`） |
 | `JEV_API_KEY` | Jev の credential |
 | `RELAY_BEARER` | 設定すると `Authorization: Bearer <値>` を必須にする（拡張の設定画面の「Relay トークン」） |
+
+リバースプロキシが localhost から Relay に接続する例:
+
+```sh
+go run ./cmd/relay -trust-proxy -trusted-proxies=127.0.0.1/32,::1/128
+```
+
+プロキシは XFF を実接続元の IP で上書きするか、受信した XFF の右端に実接続元の IP を追記してください。
+Relay は接続元が指定した CIDR に含まれる場合だけ XFF を右からたどり、最初の信頼範囲外の IP をクライアントとして使います。
+それより左の値はクライアントが変更できるため採用しません。不正な IP が信頼する区間にある場合は接続元の IP に戻します。
+通常のクライアントが属するネットワークを信頼するプロキシの範囲に含めないでください。
+`-trust-proxy` を指定しない直接接続では XFF を無視します。
+
+rate limit の IP とカウントは1分のウィンドウ終了時にタイマーで削除し、新しいアクセスがなくても保持を終えます。
 
 ## ブラウザへの読み込み
 
