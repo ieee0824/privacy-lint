@@ -16,14 +16,16 @@ import type {
 import { LIMITS, SCHEMA_VERSION } from "../shared/schema";
 import { componentsFromHeaders, dedupeComponents } from "../shared/component-patterns";
 import { observationSignature } from "../shared/signature";
+import { validatePageObservation } from "../shared/validate";
 import { compose, type RemoteResult } from "../risk/composer";
-import { cacheKeyInput, getCached, putCached, sha256Hex } from "./cache";
+import { cacheKeyInput, clearCache, getCached, putCached, sha256Hex } from "./cache";
 import { fetchDocument } from "./document-fetcher";
 import { OPERATOR_KEYWORDS, PRIVACY_KEYWORDS, extractExcerpts, htmlToBlocks } from "./document-text";
 import { relationOf, summarizeThirdParty } from "./network-observer";
 import { requestAssessment } from "./relay-client";
 import { evaluationFingerprint, loadSettings, type Settings } from "./settings";
 import { clearTabStatus, getTabStatus, setTabStatus } from "./tab-state";
+import { initialEvaluationState, transitionEvaluation, type EvaluationState, type RunIdentity } from "./assessment-state";
 
 export interface Deps {
   fetchImpl: typeof fetch;
@@ -32,13 +34,62 @@ export interface Deps {
 
 const defaultDeps: Deps = { fetchImpl: (...args) => fetch(...args), now: () => Date.now() };
 
-/** Latest assessment run per tab; older runs finishing late are discarded. */
-const generations = new Map<number, number>();
-
+interface Execution {
+  tabId: number;
+  run: RunIdentity;
+  controller: AbortController;
+  signature: string;
+  observation: PageObservation;
+  noticeKey: string;
+}
+const states = new Map<number, EvaluationState>();
+const executions = new Map<number, Execution>();
+const tabWrites = new Map<number, Promise<unknown>>();
+let cacheWrites: Promise<unknown> = Promise.resolve();
+const pendingRestores = new Set<Set<number>>();
 const observationKey = (tabId: number) => `obs:${tabId}`;
+const noticeKeyStorageKey = (tabId: number) => `context:${tabId}`;
 
-export async function rememberObservation(tabId: number, observation: PageObservation): Promise<void> {
-  await ext.storage.session.set({ [observationKey(tabId)]: observation });
+function stateFor(tabId: number): EvaluationState {
+  const stored = states.get(tabId);
+  if (stored) return stored;
+  const initial = initialEvaluationState();
+  states.set(tabId, initial);
+  return initial;
+}
+
+function begin(tabId: number, observation: PageObservation, focused: boolean, noticeKey?: string): Execution {
+  executions.get(tabId)?.controller.abort();
+  const next = transitionEvaluation(stateFor(tabId), { type: "start", focused }).state;
+  states.set(tabId, next);
+  const signature = observationSignature(observation);
+  const execution = { tabId, run: next.run, controller: new AbortController(), signature,
+    observation: structuredClone(observation), noticeKey: noticeKey ?? signature };
+  executions.set(tabId, execution);
+  return execution;
+}
+
+function isCurrent(execution: Execution): boolean {
+  return states.get(execution.tabId)?.run === execution.run && !execution.controller.signal.aborted;
+}
+
+/** Serialize short storage/badge operations, never the network evaluation. */
+function writeTab<T>(tabId: number, operation: () => Promise<T>): Promise<T> {
+  const previous = tabWrites.get(tabId) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(operation);
+  tabWrites.set(tabId, next);
+  void next.finally(() => { if (tabWrites.get(tabId) === next) tabWrites.delete(tabId); }).catch(() => undefined);
+  return next;
+}
+
+function writeCache<T>(operation: () => Promise<T>): Promise<T> {
+  const next = cacheWrites.catch(() => undefined).then(operation);
+  cacheWrites = next;
+  return next;
+}
+
+export async function rememberObservation(tabId: number, observation: PageObservation, noticeKey?: string): Promise<void> {
+  await ext.storage.session.set({ [observationKey(tabId)]: observation, [noticeKeyStorageKey(tabId)]: noticeKey ?? null });
 }
 
 export async function recallObservation(tabId: number): Promise<PageObservation | null> {
@@ -46,57 +97,172 @@ export async function recallObservation(tabId: number): Promise<PageObservation 
   return ((await ext.storage.session.get(k))[k] as PageObservation | undefined) ?? null;
 }
 
-export async function forgetObservation(tabId: number): Promise<void> {
-  await ext.storage.session.remove(observationKey(tabId));
+/** A storage read must not start work for a document invalidated while it was pending. */
+export async function recallCurrentObservation(tabId: number): Promise<PageObservation | null> {
+  const run = stateFor(tabId).run;
+  const observation = await recallObservation(tabId);
+  return states.get(tabId)?.run === run ? observation : null;
 }
 
-/**
- * Forgets everything about the tab's current page: invalidates any assessment still
- * running for it (so a late result cannot be written back), then clears the observation,
- * status and badge. Used on navigation, tab close and when the reported form disappears.
- */
-export async function resetTab(tabId: number): Promise<void> {
-  generations.set(tabId, (generations.get(tabId) ?? 0) + 1);
-  await Promise.all([clearTabStatus(tabId), forgetObservation(tabId)]);
-}
-
-/** Drops the per-tab counter once the tab is gone. */
-export function forgetTab(tabId: number): void {
-  generations.delete(tabId);
-}
-
-export async function assessTab(
-  tabId: number,
-  observation: PageObservation,
-  options: { force?: boolean } = {},
-  deps: Deps = defaultDeps,
-): Promise<void> {
-  const generation = (generations.get(tabId) ?? 0) + 1;
-  generations.set(tabId, generation);
-  const isCurrent = () => generations.get(tabId) === generation;
-
-  const settings = await loadSettings();
-  const keyHash = await sha256Hex(
-    cacheKeyInput(observation.page.origin, observationSignature(observation), evaluationFingerprint(settings)),
-  );
-  const focused = await wasFocused(tabId);
-
-  if (!options.force) {
-    const cached = await getCached(keyHash, deps.now());
-    if (cached) {
-      await finish(tabId, cached, focused, settings, isCurrent);
-      return;
-    }
+/** Explicit re-evaluation reads the DOM now, even while mutation reports are debounced. */
+export async function reassessCurrentTab(tabId: number): Promise<boolean> {
+  const run = stateFor(tabId).run;
+  const fresh: unknown = await ext.tabs.sendMessage(tabId, { type: "refresh-observation" }, { frameId: 0 })
+    .catch(() => undefined);
+  if (states.get(tabId)?.run !== run) return false;
+  if (fresh === undefined) {
+    const observation = await recallCurrentObservation(tabId);
+    if (!observation || states.get(tabId)?.run !== run) return false;
+    await assessTab(tabId, observation, { force: true });
+    return true;
   }
+  if (typeof fresh !== "object" || fresh === null || !("observation" in fresh)) return false;
+  if (fresh.observation === null) {
+    await resetTab(tabId);
+    return false;
+  }
+  const observation = validatePageObservation(fresh.observation);
+  const tab = await ext.tabs.get(tabId).catch(() => null);
+  if (!tab?.url || new URL(tab.url).origin !== observation.page.origin || states.get(tabId)?.run !== run) return false;
+  await acceptObservation(tabId, observation, { focused: "focused" in fresh && fresh.focused === true, force: true,
+    noticeKey: "noticeKey" in fresh && typeof fresh.noticeKey === "string" ? fresh.noticeKey : undefined });
+  return true;
+}
 
-  // Every write is preceded by a currency check: resetTab() may run during any await.
-  if (!isCurrent()) return;
-  await setTabStatus(tabId, { kind: "assessing", focused });
-  const assessment = await evaluate(observation, settings, deps);
-  if (!isCurrent()) return;
-  await putCached(keyHash, assessment);
-  const focusedNow = await wasFocused(tabId);
-  await finish(tabId, assessment, focusedNow, settings, isCurrent);
+export async function forgetObservation(tabId: number): Promise<void> {
+  await ext.storage.session.remove([observationKey(tabId), noticeKeyStorageKey(tabId)]);
+}
+
+/** Reserve the run before the first await, including observation persistence (#25). */
+export async function acceptObservation(tabId: number, observation: PageObservation,
+  options: { focused?: boolean; force?: boolean; noticeKey?: string } = {}, deps: Deps = defaultDeps): Promise<void> {
+  const execution = begin(tabId, observation, options.focused === true, options.noticeKey);
+  await writeTab(tabId, async () => {
+    if (isCurrent(execution)) await rememberObservation(tabId, observation, options.noticeKey);
+  });
+  if (isCurrent(execution)) await executeAssessment(execution, observation, options, deps);
+}
+
+export async function resetTab(tabId: number): Promise<void> {
+  for (const invalidated of pendingRestores) invalidated.add(tabId);
+  executions.get(tabId)?.controller.abort();
+  executions.delete(tabId);
+  states.set(tabId, transitionEvaluation(stateFor(tabId), { type: "reset" }).state);
+  await writeTab(tabId, async () => {
+    await Promise.all([clearTabStatus(tabId), forgetObservation(tabId)]);
+  });
+}
+
+export function forgetTab(tabId: number): void {
+  executions.delete(tabId);
+  states.delete(tabId);
+}
+
+/** Invalidate synchronously, then clear queued old cache writes and re-evaluate current pages. */
+export async function evaluationSettingsChanged(): Promise<void> {
+  const active = [...executions.values()].map(execution => ({ execution, focused: wasStateFocused(execution.tabId) }));
+  for (const { execution } of active) {
+    execution.controller.abort();
+    states.set(execution.tabId, transitionEvaluation(stateFor(execution.tabId), { type: "settings-changed" }).state);
+  }
+  const snapshot = new Map([...states].map(([tabId, state]) => [tabId, state.run]));
+  const invalidated = new Set<number>();
+  pendingRestores.add(invalidated);
+  try {
+    const persisted = await ext.storage.session.get(null);
+    await writeCache(clearCache);
+    const activeIds = new Set(active.map(({ execution }) => execution.tabId));
+    const restarts = [...active.map(restartAfterSettings), ...restorePersisted(persisted, snapshot, activeIds, invalidated)];
+    await Promise.all(restarts);
+  } finally {
+    pendingRestores.delete(invalidated);
+  }
+}
+
+function restorePersisted(persisted: Record<string, unknown>, snapshot: ReadonlyMap<number, RunIdentity>,
+  active: ReadonlySet<number>, invalidated: ReadonlySet<number>): Promise<void>[] {
+  const restarts: Promise<void>[] = [];
+  for (const [key, observation] of Object.entries(persisted)) {
+    if (!/^obs:\d+$/.test(key)) continue;
+    const tabId = Number(key.slice(4));
+    if (active.has(tabId) || invalidated.has(tabId) || states.get(tabId)?.run !== snapshot.get(tabId)) continue;
+    const storedStatus = persisted[`tab:${tabId}`] as TabStatus | undefined;
+    const noticeKey = persisted[noticeKeyStorageKey(tabId)];
+    restarts.push(acceptObservation(tabId, observation as PageObservation, { force: true,
+      focused: storedStatus !== undefined && storedStatus.kind !== "idle" && storedStatus.focused,
+      noticeKey: typeof noticeKey === "string" ? noticeKey : undefined }));
+  }
+  return restarts;
+}
+
+async function restartAfterSettings({ execution: previous, focused }: { execution: Execution; focused: boolean }): Promise<void> {
+  await (tabWrites.get(previous.tabId) ?? Promise.resolve()).catch(() => undefined);
+  if (executions.get(previous.tabId) !== previous) return;
+  await acceptObservation(previous.tabId, previous.observation, { focused, force: true, noticeKey: previous.noticeKey });
+}
+
+export async function assessTab(tabId: number, observation: PageObservation,
+  options: { force?: boolean } = {}, deps: Deps = defaultDeps): Promise<void> {
+  const execution = begin(tabId, observation, wasStateFocused(tabId), executions.get(tabId)?.noticeKey);
+  const [stored, context] = await Promise.all([getTabStatus(tabId), ext.storage.session.get(noticeKeyStorageKey(tabId))]);
+  const noticeKey = context[noticeKeyStorageKey(tabId)];
+  if (isCurrent(execution) && typeof noticeKey === "string") execution.noticeKey = noticeKey;
+  if (isCurrent(execution) && stored.kind !== "idle" && stored.focused) {
+    states.set(tabId, transitionEvaluation(stateFor(tabId), { type: "focus" }).state);
+  }
+  await executeAssessment(execution, observation, options, deps);
+}
+
+function wasStateFocused(tabId: number): boolean {
+  return stateFor(tabId).focused;
+}
+
+async function executeAssessment(execution: Execution, observation: PageObservation,
+  options: { force?: boolean }, deps: Deps): Promise<void> {
+  const settings = await loadSettings();
+  if (!isCurrent(execution)) return;
+  const keyHash = await sha256Hex(cacheKeyInput(observation.page.origin, execution.signature, evaluationFingerprint(settings)));
+  const cached = options.force ? null : await getCached(keyHash, deps.now());
+  if (cached) return publish(execution, cached, settings, "cached");
+  await writeTab(execution.tabId, async () => {
+    if (isCurrent(execution)) await setTabStatus(execution.tabId, stateFor(execution.tabId).status);
+  });
+  if (!isCurrent(execution)) return;
+  const fetchImpl = guardedFetch(execution, settings, deps.fetchImpl);
+  const assessment = await evaluate(observation, settings, { ...deps, fetchImpl });
+  if (!await canExecute(execution, settings)) return;
+  await writeCache(async () => {
+    if (await canExecute(execution, settings)) await putCached(keyHash, assessment);
+  });
+  await publish(execution, assessment, settings, "result");
+}
+
+async function canExecute(execution: Execution, settings: Settings): Promise<boolean> {
+  const currentSettings = await loadSettings();
+  return isCurrent(execution) && evaluationFingerprint(currentSettings) === evaluationFingerprint(settings);
+}
+
+function guardedFetch(execution: Execution, settings: Settings, fetchImpl: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    if (!await canExecute(execution, settings)) throw new DOMException("Assessment cancelled", "AbortError");
+    const signals = [execution.controller.signal];
+    if (init?.signal) signals.push(init.signal);
+    return fetchImpl(input, { ...init, signal: AbortSignal.any(signals) });
+  };
+}
+
+async function publish(execution: Execution, assessment: Assessment, settings: Settings,
+  type: "cached" | "result"): Promise<void> {
+  await writeTab(execution.tabId, async () => {
+    if (!await canExecute(execution, settings)) return;
+    const transition = transitionEvaluation(stateFor(execution.tabId), { type, run: execution.run, assessment });
+    states.set(execution.tabId, transition.state);
+    if (!transition.operations.includes("publish")) return;
+    await setTabStatus(execution.tabId, transition.state.status);
+    if (isCurrent(execution) && transition.operations.includes("notify")) {
+      await notifyCurrent(execution, assessment);
+    }
+  });
 }
 
 export async function evaluate(observation: PageObservation, settings: Settings, deps: Deps): Promise<Assessment> {
@@ -120,53 +286,48 @@ export async function evaluate(observation: PageObservation, settings: Settings,
   });
 }
 
-export async function buildRequest(
-  o: PageObservation,
-  fetchDocuments: boolean,
-  fetchImpl: typeof fetch,
-): Promise<{ request: AssessRequest; actionRelation: Statuses["formAction"]; components: ComponentObservation[] }> {
-  const actionRelation: Statuses["formAction"] = o.form.actionOrigin
-    ? relationOf(o.page.origin, o.form.actionOrigin)
-    : "none";
+export interface LinkedDocumentResult {
+  state: LinkedDocumentState;
+  components: ComponentObservation[];
+}
+export interface PreparedRequest {
+  request: AssessRequest;
+  actionRelation: Statuses["formAction"];
+  components: ComponentObservation[];
+}
 
+export async function buildRequest(o: PageObservation, fetchDocuments: boolean, fetchImpl: typeof fetch): Promise<PreparedRequest> {
   const [policy, operator] = await Promise.all([
     readLinkedDocument(o.page.origin, o.links.privacy, PRIVACY_KEYWORDS, fetchDocuments, fetchImpl),
     readLinkedDocument(o.page.origin, o.links.operator, OPERATOR_KEYWORDS, fetchDocuments, fetchImpl),
   ]);
-  const privacyPolicy = policy.state;
-  const operatorInfo = operator.state;
-  // Components stay in the extension; they are not part of the relay request.
-  const components = dedupeComponents([...o.components, ...policy.components, ...operator.components], LIMITS.components);
+  return assembleRequest(o, policy, operator);
+}
 
+/** Only already-sanitized observations and fetched document data enter this pure builder. */
+export function assembleRequest(o: PageObservation, policy: LinkedDocumentResult, operator: LinkedDocumentResult): PreparedRequest {
+  const actionRelation = o.form.actionOrigin ? relationOf(o.page.origin, o.form.actionOrigin) : "none";
   const page: AssessRequest["website"]["page"] = {
-    origin: o.page.origin,
-    scheme: o.page.scheme,
-    pathClass: o.page.pathClass,
-    headings: o.page.headings,
+    origin: o.page.origin, scheme: o.page.scheme, pathClass: o.page.pathClass, headings: [...o.page.headings],
   };
   if (o.page.title) page.title = o.page.title;
   if (o.page.footer) page.footer = o.page.footer;
-
-  return {
+  return structuredClone({
     actionRelation,
-    components,
+    components: dedupeComponents([...o.components, ...policy.components, ...operator.components], LIMITS.components),
     request: {
       schemaVersion: SCHEMA_VERSION,
       website: {
         page,
         form: {
-          method: o.form.method,
-          crossOriginAction: o.form.crossOriginAction,
-          crossSiteAction: actionRelation === "cross_site",
-          fields: o.form.fields,
-          context: o.form.context,
+          method: o.form.method, crossOriginAction: o.form.crossOriginAction,
+          crossSiteAction: actionRelation === "cross_site", fields: o.form.fields, context: o.form.context,
         },
-        privacyPolicy,
-        operatorInfo,
+        privacyPolicy: policy.state, operatorInfo: operator.state,
         thirdParty: summarizeThirdParty(o.page.origin, o.resources),
       },
     },
-  };
+  });
 }
 
 async function readLinkedDocument(
@@ -195,34 +356,33 @@ async function readLinkedDocument(
   return { state, components };
 }
 
-async function wasFocused(tabId: number): Promise<boolean> {
-  const status = await getTabStatus(tabId);
-  return status.kind !== "idle" && status.focused;
-}
-
-async function finish(
-  tabId: number,
-  assessment: Assessment,
-  focused: boolean,
-  settings: Settings,
-  isCurrent: () => boolean,
-): Promise<void> {
-  if (!isCurrent()) return;
-  await setTabStatus(tabId, { kind: "done", focused, assessment });
-  if (focused) await maybeNotify(tabId, assessment, settings);
-}
-
 /** Called when the user starts interacting with a sensitive field. */
 export async function markFocused(tabId: number): Promise<void> {
-  const status = await getTabStatus(tabId);
-  if (status.kind === "idle" || status.focused) return;
-  const next: TabStatus = { ...status, focused: true };
-  await setTabStatus(tabId, next);
-  if (next.kind === "done") await maybeNotify(tabId, next.assessment, await loadSettings());
+  const execution = executions.get(tabId);
+  if (!execution) {
+    const observation = await recallCurrentObservation(tabId);
+    if (observation) await acceptObservation(tabId, observation, { focused: true });
+    return;
+  }
+  await writeTab(tabId, async () => {
+    if (!execution || !isCurrent(execution)) return;
+    const transition = transitionEvaluation(stateFor(tabId), { type: "focus" });
+    states.set(tabId, transition.state);
+    if (!transition.operations.includes("publish")) return;
+    await setTabStatus(tabId, transition.state.status);
+    if (isCurrent(execution) && transition.state.status.kind === "done" && transition.operations.includes("notify")) {
+      await notifyCurrent(execution, transition.state.status.assessment);
+    }
+  });
 }
 
-async function maybeNotify(tabId: number, assessment: Assessment, settings: Settings): Promise<void> {
+async function notifyCurrent(execution: Execution, assessment: Assessment): Promise<void> {
+  const settings = await loadSettings();
+  if (isCurrent(execution)) await maybeNotify(execution.tabId, assessment, settings, execution.noticeKey);
+}
+
+async function maybeNotify(tabId: number, assessment: Assessment, settings: Settings, signature: string): Promise<void> {
   if (!settings.inPageNotice || assessment.level < WarningLevel.CAUTION) return;
-  const message: ContentNotice = { type: "show-notice", assessment };
+  const message: ContentNotice & { signature: string } = { type: "show-notice", assessment, signature };
   await ext.tabs.sendMessage(tabId, message, { frameId: 0 }).catch(() => undefined);
 }

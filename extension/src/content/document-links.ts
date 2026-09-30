@@ -57,9 +57,9 @@ function score(rules: LinkRule[], text: string, path: string): number {
   return max;
 }
 
-function best(links: Array<DocumentLink & { weight: number }>): DocumentLink[] {
+export function best(links: ReadonlyArray<DocumentLink & { weight: number }>): DocumentLink[] {
   const seen = new Set<string>();
-  return links
+  return [...links]
     .sort((a, b) => b.weight - a.weight)
     .filter((l) => (seen.has(l.url) ? false : (seen.add(l.url), true)))
     .slice(0, LIMITS.links)

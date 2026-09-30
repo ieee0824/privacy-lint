@@ -14,6 +14,16 @@ const POLICY = `<!doctype html><html><head><title>プライバシーポリシー
 </body></html>`;
 
 describe("htmlToBlocks / extractExcerpts", () => {
+  it.each(["gi", "y", "gy"])("treats %s keywords as a per-block predicate without touching lastIndex", (flags) => {
+    const doc = { blocks: ["prefix purpose " + "a".repeat(45), "purpose " + "b".repeat(45), "other"] };
+    const keywords = new RegExp("purpose", flags);
+    keywords.lastIndex = 7;
+    Object.freeze(keywords);
+    const expected = extractExcerpts(doc, /purpose/i);
+    expect(extractExcerpts(doc, keywords)).toEqual(expected);
+    expect(extractExcerpts(doc, keywords)).toEqual(expected);
+    expect(keywords.lastIndex).toBe(7);
+  });
   it("drops scripts, styles and comments", () => {
     const doc = htmlToBlocks(POLICY);
     expect(doc.title).toBe("プライバシーポリシー | Sample");

@@ -121,6 +121,49 @@ function schemaVersion(v: unknown, p: string): number {
   return SCHEMA_VERSION;
 }
 
+function link(x: unknown, p: string): DocumentLink {
+  const l = obj(x, p, ["url", "text"]);
+  return { url: httpUrl(l.url, `${p}.url`), text: str(l.text, `${p}.text`, LIMITS.labelText) };
+}
+function component(x: unknown, p: string): ComponentObservation {
+  const c = obj(x, p, ["id", "version"]);
+  const version = str(c.version, `${p}.version`, 20);
+  if (!isVersion(version)) fail(`${p}.version`, "not a version");
+  return { id: oneOf(c.id, `${p}.id`, COMPONENT_IDS), version };
+}
+function resource(x: unknown, p: string): ResourceOrigin {
+  const r = obj(x, p, ["origin", "kind"]);
+  return { origin: origin(r.origin, `${p}.origin`), kind: oneOf(r.kind, `${p}.kind`, RESOURCE_KINDS) };
+}
+
+function observedForm(form: Obj): FormObservation {
+  const formObs: FormObservation = {
+    method: oneOf(form.method, "form.method", FORM_METHODS),
+    actionScheme: oneOf(form.actionScheme, "form.actionScheme", [...SCHEMES, "none"] as const),
+    crossOriginAction: bool(form.crossOriginAction, "form.crossOriginAction"),
+    fieldCount: int(form.fieldCount, "form.fieldCount", 1000),
+    fields: arr(form.fields, "form.fields", LIMITS.fields, field),
+    context: arr(form.context, "form.context", LIMITS.contextTexts, text(LIMITS.shortText)),
+  };
+  if (form.actionOrigin !== undefined) formObs.actionOrigin = origin(form.actionOrigin, "form.actionOrigin");
+
+  return formObs;
+}
+
+function validatedPage(page: Obj, p: string): PageObservation["page"] {
+  const pageObs: PageObservation["page"] = {
+    origin: origin(page.origin, `${p}.origin`),
+    scheme: oneOf(page.scheme, `${p}.scheme`, SCHEMES),
+    pathClass: oneOf(page.pathClass, `${p}.pathClass`, PATH_CLASSES),
+    headings: arr(page.headings, `${p}.headings`, LIMITS.headings, text(LIMITS.shortText)),
+  };
+  const title = optStr(page.title, `${p}.title`, LIMITS.shortText);
+  if (title !== undefined) pageObs.title = title;
+  const footer = optStr(page.footer, `${p}.footer`, LIMITS.footerText);
+  if (footer !== undefined) pageObs.footer = footer;
+  return pageObs;
+}
+
 export function validatePageObservation(v: unknown): PageObservation {
   const o = obj(v, "observation", ["schemaVersion", "page", "form", "links", "resources", "components"]);
   const page = obj(o.page, "page", ["origin", "scheme", "pathClass", "title", "headings", "footer"]);
@@ -134,41 +177,8 @@ export function validatePageObservation(v: unknown): PageObservation {
     "context",
   ]);
   const links = obj(o.links, "links", ["privacy", "operator"]);
-  const link = (x: unknown, p: string): DocumentLink => {
-    const l = obj(x, p, ["url", "text"]);
-    return { url: httpUrl(l.url, `${p}.url`), text: str(l.text, `${p}.text`, LIMITS.labelText) };
-  };
-  const component = (x: unknown, p: string): ComponentObservation => {
-    const c = obj(x, p, ["id", "version"]);
-    const version = str(c.version, `${p}.version`, 20);
-    if (!isVersion(version)) fail(`${p}.version`, "not a version");
-    return { id: oneOf(c.id, `${p}.id`, COMPONENT_IDS), version };
-  };
-  const resource = (x: unknown, p: string): ResourceOrigin => {
-    const r = obj(x, p, ["origin", "kind"]);
-    return { origin: origin(r.origin, `${p}.origin`), kind: oneOf(r.kind, `${p}.kind`, RESOURCE_KINDS) };
-  };
-
-  const formObs: FormObservation = {
-    method: oneOf(form.method, "form.method", FORM_METHODS),
-    actionScheme: oneOf(form.actionScheme, "form.actionScheme", [...SCHEMES, "none"] as const),
-    crossOriginAction: bool(form.crossOriginAction, "form.crossOriginAction"),
-    fieldCount: int(form.fieldCount, "form.fieldCount", 1000),
-    fields: arr(form.fields, "form.fields", LIMITS.fields, field),
-    context: arr(form.context, "form.context", LIMITS.contextTexts, text(LIMITS.shortText)),
-  };
-  if (form.actionOrigin !== undefined) formObs.actionOrigin = origin(form.actionOrigin, "form.actionOrigin");
-
-  const pageObs: PageObservation["page"] = {
-    origin: origin(page.origin, "page.origin"),
-    scheme: oneOf(page.scheme, "page.scheme", SCHEMES),
-    pathClass: oneOf(page.pathClass, "page.pathClass", PATH_CLASSES),
-    headings: arr(page.headings, "page.headings", LIMITS.headings, text(LIMITS.shortText)),
-  };
-  const title = optStr(page.title, "page.title", LIMITS.shortText);
-  if (title !== undefined) pageObs.title = title;
-  const footer = optStr(page.footer, "page.footer", LIMITS.footerText);
-  if (footer !== undefined) pageObs.footer = footer;
+  const formObs = observedForm(form);
+  const pageObs = validatedPage(page, "page");
 
   return {
     schemaVersion: schemaVersion(o.schemaVersion, "schemaVersion"),
@@ -183,6 +193,18 @@ export function validatePageObservation(v: unknown): PageObservation {
   };
 }
 
+function linkedDocument(x: unknown, p: string) {
+  const d = obj(x, p, ["found", "fetched", "title", "excerpts"]);
+  const out: AssessRequest["website"]["privacyPolicy"] = {
+    found: bool(d.found, `${p}.found`),
+    fetched: bool(d.fetched, `${p}.fetched`),
+    excerpts: arr(d.excerpts, `${p}.excerpts`, LIMITS.excerptsPerDocument, text(LIMITS.excerptText)),
+  };
+  const t = optStr(d.title, `${p}.title`, LIMITS.shortText);
+  if (t !== undefined) out.title = t;
+  return out;
+}
+
 /** Validates the outbound payload right before it is sent (defence in depth). */
 export function validateAssessRequest(v: unknown): AssessRequest {
   const o = obj(v, "request", ["schemaVersion", "website"]);
@@ -190,28 +212,7 @@ export function validateAssessRequest(v: unknown): AssessRequest {
   const page = obj(w.page, "website.page", ["origin", "scheme", "pathClass", "title", "headings", "footer"]);
   const form = obj(w.form, "website.form", ["method", "crossOriginAction", "crossSiteAction", "fields", "context"]);
   const tp = obj(w.thirdParty, "website.thirdParty", ["totalOrigins", "scriptOrigins", "iframeOrigins"]);
-  const doc = (x: unknown, p: string) => {
-    const d = obj(x, p, ["found", "fetched", "title", "excerpts"]);
-    const out: AssessRequest["website"]["privacyPolicy"] = {
-      found: bool(d.found, `${p}.found`),
-      fetched: bool(d.fetched, `${p}.fetched`),
-      excerpts: arr(d.excerpts, `${p}.excerpts`, LIMITS.excerptsPerDocument, text(LIMITS.excerptText)),
-    };
-    const t = optStr(d.title, `${p}.title`, LIMITS.shortText);
-    if (t !== undefined) out.title = t;
-    return out;
-  };
-
-  const pageOut: AssessRequest["website"]["page"] = {
-    origin: origin(page.origin, "website.page.origin"),
-    scheme: oneOf(page.scheme, "website.page.scheme", SCHEMES),
-    pathClass: oneOf(page.pathClass, "website.page.pathClass", PATH_CLASSES),
-    headings: arr(page.headings, "website.page.headings", LIMITS.headings, text(LIMITS.shortText)),
-  };
-  const title = optStr(page.title, "website.page.title", LIMITS.shortText);
-  if (title !== undefined) pageOut.title = title;
-  const footer = optStr(page.footer, "website.page.footer", LIMITS.footerText);
-  if (footer !== undefined) pageOut.footer = footer;
+  const pageOut = validatedPage(page, "website.page");
 
   return {
     schemaVersion: schemaVersion(o.schemaVersion, "schemaVersion"),
@@ -224,8 +225,8 @@ export function validateAssessRequest(v: unknown): AssessRequest {
         fields: arr(form.fields, "website.form.fields", LIMITS.fields, field),
         context: arr(form.context, "website.form.context", LIMITS.contextTexts, text(LIMITS.shortText)),
       },
-      privacyPolicy: doc(w.privacyPolicy, "website.privacyPolicy"),
-      operatorInfo: doc(w.operatorInfo, "website.operatorInfo"),
+      privacyPolicy: linkedDocument(w.privacyPolicy, "website.privacyPolicy"),
+      operatorInfo: linkedDocument(w.operatorInfo, "website.operatorInfo"),
       thirdParty: {
         totalOrigins: int(tp.totalOrigins, "website.thirdParty.totalOrigins", LIMITS.resources),
         scriptOrigins: int(tp.scriptOrigins, "website.thirdParty.scriptOrigins", LIMITS.resources),
