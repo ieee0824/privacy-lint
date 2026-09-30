@@ -10,12 +10,40 @@ export const ALL_SITES = ["https://*/*", "http://*/*"];
 
 export async function grantedMatchPatterns(): Promise<string[]> {
   const { origins = [] } = await ext.permissions.getAll();
+  return normalizeMatchPatterns(origins);
+}
+
+export function normalizeMatchPatterns(origins: readonly string[]): string[] {
   const patterns = new Set<string>();
   for (const origin of origins) {
     if (origin === "<all_urls>") ALL_SITES.forEach((p) => patterns.add(p));
     else if (/^(https?|\*):\/\//.test(origin)) patterns.add(origin);
   }
   return Array.from(patterns).sort();
+}
+
+interface ScriptSnapshot {
+  readonly matches?: readonly string[];
+}
+
+export type RegistrationPlan =
+  | { kind: "keep" }
+  | { kind: "change"; unregister: boolean; registration: chrome.scripting.RegisteredContentScript | null };
+
+/** Decide from explicit snapshots; every registration owns its arrays. */
+export function registrationPlan(origins: readonly string[], registered: readonly ScriptSnapshot[]): RegistrationPlan {
+  const matches = normalizeMatchPatterns(origins);
+  const current = registered[0]?.matches?.slice().sort() ?? [];
+  if (JSON.stringify(current) === JSON.stringify(matches)) return { kind: "keep" };
+  const registration: chrome.scripting.RegisteredContentScript | null = matches.length === 0 ? null : {
+    id: SCRIPT_ID,
+    js: ["content.js"],
+    matches,
+    runAt: "document_idle",
+    allFrames: false,
+    // Persist across browser restarts so restored tabs are covered before background starts.
+  };
+  return { kind: "change", unregister: registered.length > 0, registration };
 }
 
 let syncing: Promise<void> = Promise.resolve();
@@ -27,24 +55,14 @@ export function syncContentScripts(): Promise<void> {
 }
 
 async function syncOnce(): Promise<void> {
-  const matches = await grantedMatchPatterns();
-  const registered = await ext.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] });
-  const current = registered[0]?.matches?.slice().sort() ?? [];
-  if (JSON.stringify(current) === JSON.stringify(matches)) return;
-
-  if (registered.length > 0) await ext.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] });
-  if (matches.length === 0) return;
-  await ext.scripting.registerContentScripts([
-    {
-      id: SCRIPT_ID,
-      js: ["content.js"],
-      matches,
-      runAt: "document_idle",
-      allFrames: false,
-      // Kept across browser restarts (the default) so restored tabs are covered before the
-      // background has started; syncContentScripts() still reconciles on every start-up.
-    },
+  const [{ origins = [] }, registered] = await Promise.all([
+    ext.permissions.getAll(),
+    ext.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] }),
   ]);
+  const plan = registrationPlan(origins, registered);
+  if (plan.kind === "keep") return;
+  if (plan.unregister) await ext.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] });
+  if (plan.registration) await ext.scripting.registerContentScripts([plan.registration]);
 }
 
 /** Injects the content script into already-open tabs that just became permitted. */
