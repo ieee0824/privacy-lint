@@ -39,12 +39,14 @@ interface Execution {
   run: RunIdentity;
   controller: AbortController;
   signature: string;
+  observation: PageObservation;
+  noticeKey: string;
 }
 const states = new Map<number, EvaluationState>();
 const executions = new Map<number, Execution>();
 const tabWrites = new Map<number, Promise<unknown>>();
 let cacheWrites: Promise<unknown> = Promise.resolve();
-let lifecycleEpoch = 0;
+const pendingRestores = new Set<Set<number>>();
 const observationKey = (tabId: number) => `obs:${tabId}`;
 
 function stateFor(tabId: number): EvaluationState {
@@ -55,11 +57,13 @@ function stateFor(tabId: number): EvaluationState {
   return initial;
 }
 
-function begin(tabId: number, observation: PageObservation, focused: boolean): Execution {
+function begin(tabId: number, observation: PageObservation, focused: boolean, noticeKey?: string): Execution {
   executions.get(tabId)?.controller.abort();
   const next = transitionEvaluation(stateFor(tabId), { type: "start", focused }).state;
   states.set(tabId, next);
-  const execution = { tabId, run: next.run, controller: new AbortController(), signature: observationSignature(observation) };
+  const signature = observationSignature(observation);
+  const execution = { tabId, run: next.run, controller: new AbortController(), signature,
+    observation: structuredClone(observation), noticeKey: noticeKey ?? signature };
   executions.set(tabId, execution);
   return execution;
 }
@@ -119,7 +123,8 @@ export async function reassessCurrentTab(tabId: number): Promise<boolean> {
   const observation = validatePageObservation(fresh.observation);
   const tab = await ext.tabs.get(tabId).catch(() => null);
   if (!tab?.url || new URL(tab.url).origin !== observation.page.origin || states.get(tabId)?.run !== run) return false;
-  await acceptObservation(tabId, observation, { focused: "focused" in fresh && fresh.focused === true, force: true });
+  await acceptObservation(tabId, observation, { focused: "focused" in fresh && fresh.focused === true, force: true,
+    noticeKey: "noticeKey" in fresh && typeof fresh.noticeKey === "string" ? fresh.noticeKey : undefined });
   return true;
 }
 
@@ -129,8 +134,8 @@ export async function forgetObservation(tabId: number): Promise<void> {
 
 /** Reserve the run before the first await, including observation persistence (#25). */
 export async function acceptObservation(tabId: number, observation: PageObservation,
-  options: { focused?: boolean; force?: boolean } = {}, deps: Deps = defaultDeps): Promise<void> {
-  const execution = begin(tabId, observation, options.focused === true);
+  options: { focused?: boolean; force?: boolean; noticeKey?: string } = {}, deps: Deps = defaultDeps): Promise<void> {
+  const execution = begin(tabId, observation, options.focused === true, options.noticeKey);
   await writeTab(tabId, async () => {
     if (isCurrent(execution)) await rememberObservation(tabId, observation);
   });
@@ -138,7 +143,7 @@ export async function acceptObservation(tabId: number, observation: PageObservat
 }
 
 export async function resetTab(tabId: number): Promise<void> {
-  lifecycleEpoch++;
+  for (const invalidated of pendingRestores) invalidated.add(tabId);
   executions.get(tabId)?.controller.abort();
   executions.delete(tabId);
   states.set(tabId, transitionEvaluation(stateFor(tabId), { type: "reset" }).state);
@@ -154,35 +159,46 @@ export function forgetTab(tabId: number): void {
 
 /** Invalidate synchronously, then clear queued old cache writes and re-evaluate current pages. */
 export async function evaluationSettingsChanged(): Promise<void> {
-  const active = [...executions.values()];
-  for (const execution of active) {
+  const active = [...executions.values()].map(execution => ({ execution, focused: wasStateFocused(execution.tabId) }));
+  for (const { execution } of active) {
     execution.controller.abort();
     states.set(execution.tabId, transitionEvaluation(stateFor(execution.tabId), { type: "settings-changed" }).state);
   }
   const snapshot = new Map([...states].map(([tabId, state]) => [tabId, state.run]));
-  const snapshotEpoch = lifecycleEpoch;
-  const persisted = await ext.storage.session.get(null);
-  await writeCache(clearCache);
-  const restarts = active.map(restartAfterSettings);
+  const invalidated = new Set<number>();
+  pendingRestores.add(invalidated);
+  try {
+    const persisted = await ext.storage.session.get(null);
+    await writeCache(clearCache);
+    const activeIds = new Set(active.map(({ execution }) => execution.tabId));
+    const restarts = [...active.map(restartAfterSettings), ...restorePersisted(persisted, snapshot, activeIds, invalidated)];
+    await Promise.all(restarts);
+  } finally {
+    pendingRestores.delete(invalidated);
+  }
+}
+
+function restorePersisted(persisted: Record<string, unknown>, snapshot: ReadonlyMap<number, RunIdentity>,
+  active: ReadonlySet<number>, invalidated: ReadonlySet<number>): Promise<void>[] {
+  const restarts: Promise<void>[] = [];
   for (const [key, observation] of Object.entries(persisted)) {
     if (!/^obs:\d+$/.test(key)) continue;
     const tabId = Number(key.slice(4));
-    if (active.some((execution) => execution.tabId === tabId) || states.get(tabId)?.run !== snapshot.get(tabId)) continue;
-    if (!snapshot.has(tabId) && snapshotEpoch !== lifecycleEpoch) continue;
+    if (active.has(tabId) || invalidated.has(tabId) || states.get(tabId)?.run !== snapshot.get(tabId)) continue;
     restarts.push(assessTab(tabId, observation as PageObservation, { force: true }));
   }
-  await Promise.all(restarts);
+  return restarts;
 }
 
-async function restartAfterSettings(previous: Execution): Promise<void> {
-  const observation = await recallObservation(previous.tabId);
-  if (!observation || executions.get(previous.tabId) !== previous) return;
-  await assessTab(previous.tabId, observation, { force: true });
+async function restartAfterSettings({ execution: previous, focused }: { execution: Execution; focused: boolean }): Promise<void> {
+  await (tabWrites.get(previous.tabId) ?? Promise.resolve()).catch(() => undefined);
+  if (executions.get(previous.tabId) !== previous) return;
+  await acceptObservation(previous.tabId, previous.observation, { focused, force: true, noticeKey: previous.noticeKey });
 }
 
 export async function assessTab(tabId: number, observation: PageObservation,
   options: { force?: boolean } = {}, deps: Deps = defaultDeps): Promise<void> {
-  const execution = begin(tabId, observation, stateFor(tabId).status.kind !== "idle" && wasStateFocused(tabId));
+  const execution = begin(tabId, observation, wasStateFocused(tabId), executions.get(tabId)?.noticeKey);
   const stored = await getTabStatus(tabId);
   if (isCurrent(execution) && stored.kind !== "idle" && stored.focused) {
     states.set(tabId, transitionEvaluation(stateFor(tabId), { type: "focus" }).state);
@@ -356,7 +372,7 @@ export async function markFocused(tabId: number): Promise<void> {
 
 async function notifyCurrent(execution: Execution, assessment: Assessment): Promise<void> {
   const settings = await loadSettings();
-  if (isCurrent(execution)) await maybeNotify(execution.tabId, assessment, settings, execution.signature);
+  if (isCurrent(execution)) await maybeNotify(execution.tabId, assessment, settings, execution.noticeKey);
 }
 
 async function maybeNotify(tabId: number, assessment: Assessment, settings: Settings, signature: string): Promise<void> {

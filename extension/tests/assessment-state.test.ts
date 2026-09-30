@@ -17,6 +17,20 @@ const observation: PageObservation = {
 };
 
 describe("explicit evaluation transitions", () => {
+  it("returned state cannot mutate an earlier state or supplied assessment", () => {
+    const started = transitionEvaluation(initialEvaluationState(), { type: "start", focused: false }).state;
+    const result = transitionEvaluation(started, { type: "result", run: started.run, assessment }).state;
+    const focused = transitionEvaluation(result, { type: "focus" }).state;
+    expect(Object.isFrozen(focused.run)).toBe(true);
+    if (focused.status.kind !== "done" || result.status.kind !== "done") throw new Error("missing done state");
+    focused.status.assessment.findings.push({ id: "insecure_page", severity: "warn" });
+    expect(result.status.assessment.findings).toEqual([]);
+    expect(assessment.findings).toEqual([]);
+    const unchanged = transitionEvaluation(result, { type: "result", run: { generation: 0 }, assessment }).state;
+    if (unchanged.status.kind !== "done") throw new Error("missing done state");
+    unchanged.status.assessment.sensitiveKinds.push("password");
+    expect(result.status.assessment.sensitiveKinds).toEqual(["email"]);
+  });
   it("start, focus, cache and reset are deterministic and do not mutate the input", () => {
     const initial = Object.freeze(initialEvaluationState());
     const event = { type: "start", focused: false } as const;

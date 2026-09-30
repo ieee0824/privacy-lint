@@ -28,7 +28,9 @@ async function handleContent(message: ContentMessage, sender: Sender): Promise<v
     const observation = validatePageObservation(message.observation);
     // The observation must describe the page that sent it.
     if (!sender.url || new URL(sender.url).origin !== observation.page.origin) return;
-    await acceptObservation(tabId, observation, { focused: (message as { focused?: unknown }).focused === true });
+    const metadata = message as { focused?: unknown; noticeKey?: unknown };
+    await acceptObservation(tabId, observation, { focused: metadata.focused === true,
+      noticeKey: typeof metadata.noticeKey === "string" ? metadata.noticeKey : undefined });
   } else if (message.type === "sensitive-focus") {
     await markFocused(tabId);
   } else if (message.type === "form-gone") {

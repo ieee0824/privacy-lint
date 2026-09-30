@@ -146,4 +146,62 @@ describe("assessment persistence and cancellation", () => {
     expect(await getTabStatus(tabId)).toMatchObject({ kind: "done", assessment: { state: "insufficient_information" } });
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("settings restart retains the newest observation while its persistence is pending", async () => {
+    await saveSettings({ ...DEFAULT_SETTINGS, remoteEvaluation: false });
+    await acceptObservation(tabId, observation);
+    const started = deferred();
+    const gate = deferred();
+    let held = false;
+    const storage = chrome.storage.session;
+    const original = storage.set;
+    storage.set = (async (items: Record<string, unknown>) => {
+      if (Object.hasOwn(items, `obs:${tabId}`) && !held) { held = true; started.release(); await gate.promise; }
+      return original(items);
+    }) as typeof storage.set;
+    const newest = { ...observation, links: { privacy: [], operator: [] },
+      form: { ...observation.form, fields: [{ kind: "password" as const, required: true }] } };
+    const postedKinds: string[][] = [];
+    vi.stubGlobal("fetch", async (_input: unknown, init: RequestInit) => {
+      postedKinds.push(JSON.parse(String(init.body)).website.form.fields.map((field: { kind: string }) => field.kind));
+      return answer();
+    });
+    const accepting = acceptObservation(tabId, newest);
+    await started.promise;
+    await saveSettings({ ...DEFAULT_SETTINGS, remoteEvaluation: true });
+    const changing = evaluationSettingsChanged();
+    gate.release();
+    await Promise.all([accepting, changing]);
+    expect(postedKinds).toEqual([["password"]]);
+    expect(await getTabStatus(tabId)).toMatchObject({ kind: "done", assessment: { sensitiveKinds: ["password"] } });
+    expect(fake.session.get(`obs:${tabId}`)).toEqual(newest);
+  });
+
+  it("closing one suspended tab does not prevent settings refresh of another tab", async () => {
+    const otherTabId = tabId + 10_000;
+    await rememberObservation(tabId, observation);
+    await rememberObservation(otherTabId, observation);
+    forgetTab(tabId);
+    forgetTab(otherTabId);
+    await saveSettings({ ...DEFAULT_SETTINGS, remoteEvaluation: false });
+    const started = deferred();
+    const gate = deferred();
+    const storage = chrome.storage.session;
+    const original = storage.get;
+    storage.get = (async (keys: string | string[] | null) => {
+      const result = await original(keys);
+      if (keys === null) { started.release(); await gate.promise; }
+      return result;
+    }) as typeof storage.get;
+    const changing = evaluationSettingsChanged();
+    await started.promise;
+    await resetTab(tabId);
+    forgetTab(tabId);
+    gate.release();
+    await changing;
+    expect(await getTabStatus(tabId)).toEqual({ kind: "idle" });
+    expect(await getTabStatus(otherTabId)).toMatchObject({ kind: "done", assessment: { state: "insufficient_information" } });
+    await resetTab(otherTabId);
+    forgetTab(otherTabId);
+  });
 });

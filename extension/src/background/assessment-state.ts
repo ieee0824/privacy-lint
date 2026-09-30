@@ -1,6 +1,6 @@
 import type { Assessment, TabStatus } from "../shared/assessment";
 
-export interface RunIdentity { generation: number }
+export interface RunIdentity { readonly generation: number }
 export interface EvaluationState {
   run: RunIdentity;
   status: TabStatus;
@@ -14,7 +14,7 @@ export type EvaluationEvent =
 export type EvaluationOperation = "evaluate" | "clear" | "publish" | "notify";
 
 export function initialEvaluationState(): EvaluationState {
-  return { run: { generation: 0 }, status: { kind: "idle" } };
+  return { run: Object.freeze({ generation: 0 }), status: { kind: "idle" } };
 }
 
 /** The executor owns run identities; equality here is their explicit generation. */
@@ -22,21 +22,25 @@ export function transitionEvaluation(state: EvaluationState, event: EvaluationEv
   state: EvaluationState; operations: EvaluationOperation[];
 } {
   if (event.type === "start") return {
-    state: { run: { generation: state.run.generation + 1 }, status: { kind: "assessing", focused: event.focused } },
+    state: { run: Object.freeze({ generation: state.run.generation + 1 }), status: { kind: "assessing", focused: event.focused } },
     operations: ["evaluate"],
   };
   if (event.type === "reset" || event.type === "settings-changed") return {
-    state: { run: { generation: state.run.generation + 1 }, status: { kind: "idle" } }, operations: ["clear"],
+    state: { run: Object.freeze({ generation: state.run.generation + 1 }), status: { kind: "idle" } }, operations: ["clear"],
   };
   if (event.type === "focus") return focusTransition(state);
-  if (event.run.generation !== state.run.generation || state.status.kind === "idle") return { state, operations: [] };
+  if (event.run.generation !== state.run.generation || state.status.kind === "idle") return { state: copyState(state), operations: [] };
   const focused = state.status.focused;
-  return { state: { ...state, status: { kind: "done", focused, assessment: event.assessment } },
+  return { state: { ...state, status: { kind: "done", focused, assessment: structuredClone(event.assessment) } },
     operations: focused ? ["publish", "notify"] : ["publish"] };
 }
 
 function focusTransition(state: EvaluationState) {
-  if (state.status.kind === "idle" || state.status.focused) return { state, operations: [] };
+  if (state.status.kind === "idle" || state.status.focused) return { state: copyState(state), operations: [] };
   const operations: EvaluationOperation[] = state.status.kind === "done" ? ["publish", "notify"] : ["publish"];
-  return { state: { ...state, status: { ...state.status, focused: true } }, operations };
+  return { state: { ...state, status: { ...structuredClone(state.status), focused: true } }, operations };
+}
+
+function copyState(state: EvaluationState): EvaluationState {
+  return { run: state.run, status: structuredClone(state.status) };
 }
