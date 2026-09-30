@@ -9,18 +9,27 @@ import { sanitizeText } from "../privacy/sanitizer";
 
 const SKIPPED_ANCESTORS = new Set(["INPUT", "TEXTAREA", "SELECT", "OPTION", "SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
 
+/** Attribute facts are collected before any text is read. False stops inheritance. */
+export function editableFromAttributes(attributes: readonly (string | null)[]): boolean {
+  const setting = attributes.find(raw => raw !== null && /^(|true|false|plaintext-only)$/i.test(raw));
+  return setting !== undefined && setting !== null && setting.toLowerCase() !== "false";
+}
+
+function readableTextNode(node: Node): boolean {
+  const attributes: (string | null)[] = [];
+  for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+    if (SKIPPED_ANCESTORS.has(parent.tagName)) return false;
+    attributes.push(parent.getAttribute("contenteditable"));
+  }
+  return !editableFromAttributes(attributes);
+}
+
 export function authorText(root: Node, maxLength: number): string {
   const doc = root.ownerDocument ?? (root as Document);
+  // A whole-document editing host can contain entered text without CE attributes.
+  if (doc.designMode?.toLowerCase() === "on") return "";
   const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      for (let p = node.parentElement; p && p !== root.parentElement; p = p.parentElement) {
-        if (SKIPPED_ANCESTORS.has(p.tagName)) return NodeFilter.FILTER_REJECT;
-        if (p.getAttribute("contenteditable") !== null && p.getAttribute("contenteditable") !== "false") {
-          return NodeFilter.FILTER_REJECT;
-        }
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
+    acceptNode: node => readableTextNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
   });
   const parts: string[] = [];
   let length = 0;

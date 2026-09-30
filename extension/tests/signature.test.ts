@@ -45,10 +45,22 @@ describe("observationSignature", () => {
     expect(observationSignature(changed)).not.toBe(observationSignature(base()));
   });
 
-  it("ignores resource origins (ads and analytics change them continuously)", () => {
+  it("changes when assessment resource counts change", () => {
     const changed = base();
     changed.resources = [{ origin: "https://ads.example", kind: "script" }];
-    expect(observationSignature(changed)).toBe(observationSignature(base()));
+    expect(observationSignature(changed)).not.toBe(observationSignature(base()));
+  });
+
+  it("ignores resource order, duplicates, and additional hosts within one third-party site", () => {
+    const first = base();
+    first.resources = [
+      { origin: "https://one.ads.example", kind: "script" },
+      { origin: "https://frames.other.example", kind: "iframe" },
+    ];
+    const second = { ...first, resources: [
+      ...[...first.resources].reverse(), { origin: "https://two.ads.example", kind: "script" as const },
+    ] };
+    expect(observationSignature(first)).toBe(observationSignature(second));
   });
 });
 

@@ -35,14 +35,23 @@ const STYLE = `
 `;
 
 export function showNotice(doc: Document, assessment: Assessment): void {
-  doc.getElementById(HOST_ID)?.remove();
-
+  clearNotice(doc);
   const host = doc.createElement("div");
   host.id = HOST_ID;
   const shadow = host.attachShadow({ mode: "closed" });
-
   const style = doc.createElement("style");
   style.textContent = STYLE;
+  const box = noticeBox(doc, assessment, () => host.remove());
+  shadow.append(style, box);
+  (doc.body ?? doc.documentElement).append(host);
+  setTimeout(() => host.remove(), AUTO_HIDE_MS);
+}
+
+export function clearNotice(doc: Document): void {
+  doc.getElementById(HOST_ID)?.remove();
+}
+
+function noticeBox(doc: Document, assessment: Assessment, onClose: () => void): HTMLDivElement {
   const box = doc.createElement("div");
   box.className = "box";
   box.setAttribute("role", "status");
@@ -52,28 +61,32 @@ export function showNotice(doc: Document, assessment: Assessment): void {
   title.textContent = `Privacy Lint: ${headline(assessment.state, assessment.level)}`;
   box.append(title);
 
+  box.append(noticeFindings(doc, assessment));
+
+  const note = doc.createElement("p");
+  note.className = "note";
+  note.textContent = `詳細はツールバーの Privacy Lint アイコンから確認できます。${DISCLAIMER}`;
+  box.append(note);
+  box.append(closeButton(doc, onClose));
+  return box;
+}
+
+function noticeFindings(doc: Document, assessment: Assessment): HTMLUListElement {
   const list = doc.createElement("ul");
   for (const finding of assessment.findings.filter((f) => f.severity === "warn").slice(0, 3)) {
     const li = doc.createElement("li");
     li.textContent = `${findingIcon(finding)} ${findingText(finding)}`;
     list.append(li);
   }
-  box.append(list);
+  return list;
+}
 
-  const note = doc.createElement("p");
-  note.className = "note";
-  note.textContent = `詳細はツールバーの Privacy Lint アイコンから確認できます。${DISCLAIMER}`;
-  box.append(note);
-
+function closeButton(doc: Document, onClose: () => void): HTMLButtonElement {
   const close = doc.createElement("button");
   close.type = "button";
   close.tabIndex = -1;
   close.setAttribute("aria-label", "閉じる");
   close.textContent = "×";
-  close.addEventListener("click", () => host.remove());
-  box.append(close);
-
-  shadow.append(style, box);
-  (doc.body ?? doc.documentElement).append(host);
-  setTimeout(() => host.remove(), AUTO_HIDE_MS);
+  close.addEventListener("click", onClose);
+  return close;
 }
